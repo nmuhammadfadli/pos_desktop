@@ -1,14 +1,13 @@
-/*
- * To change this license header, choose License Headers in Project Properties.
- * To change this template file, choose Tools | Templates
- * and open the template in the editor.
- */
 package testsqlite;
 
 import javax.swing.*;
 import java.awt.*;
 import java.util.List;
 
+/*
+Dialog detail pembelian: input id barang, harga, stok, pilih supplier, tampilkan subtotal.
+Perbaikan: saat edit, combo supplier akan memilih supplier yang sesuai (jika ditemukan).
+*/
 public class AddEditDetailPembelianDialog extends JDialog {
     private JTextField txtIdBarang = new JTextField(8);
     private JTextField txtHargaBeli = new JTextField(10);
@@ -32,6 +31,16 @@ public class AddEditDetailPembelianDialog extends JDialog {
             if (d.getHargaBeli() != null) txtHargaBeli.setText(String.valueOf(d.getHargaBeli()));
             if (d.getStok() != null) txtStok.setText(String.valueOf(d.getStok()));
             lblSubtotal.setText(String.valueOf(d.getSubtotal() == null ? 0 : d.getSubtotal()));
+            // select supplier in combo if available
+            if (d.getIdSupplier() != null && cbSupplier.getItemCount() > 0) {
+                for (int i = 0; i < cbSupplier.getItemCount(); i++) {
+                    Supplier s = cbSupplier.getItemAt(i);
+                    if (s != null && s.getIdSupplier() == d.getIdSupplier()) {
+                        cbSupplier.setSelectedIndex(i);
+                        break;
+                    }
+                }
+            }
         }
     }
 
@@ -76,6 +85,9 @@ public class AddEditDetailPembelianDialog extends JDialog {
                 return this;
             }
         });
+        // if there are any suppliers and nothing selected, select first by default
+        if (cbSupplier.getItemCount() > 0 && cbSupplier.getSelectedIndex() == -1) cbSupplier.setSelectedIndex(0);
+
         form.add(cbSupplier, gbc);
 
         gbc.gridx = 0; gbc.gridy = 4; gbc.anchor = GridBagConstraints.EAST; gbc.fill = GridBagConstraints.NONE;
@@ -103,7 +115,9 @@ public class AddEditDetailPembelianDialog extends JDialog {
         try {
             int h = Integer.parseInt(txtHargaBeli.getText().trim());
             int s = Integer.parseInt(txtStok.getText().trim());
-            lblSubtotal.setText(String.valueOf(h * s));
+            long calc = (long) h * (long) s;
+            if (calc > Integer.MAX_VALUE) calc = Integer.MAX_VALUE;
+            lblSubtotal.setText(String.valueOf(calc));
         } catch (Exception ex) {
             lblSubtotal.setText("0");
         }
@@ -121,7 +135,8 @@ public class AddEditDetailPembelianDialog extends JDialog {
             detail.setHargaBeli(harga);
             detail.setStok(stok);
             detail.setIdSupplier(sel.getIdSupplier());
-            detail.setSubtotal(harga * stok);
+            long calc = (long) harga * (long) stok;
+            detail.setSubtotal((int) Math.min(calc, Integer.MAX_VALUE));
 
             saved = true;
             setVisible(false);

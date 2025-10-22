@@ -24,6 +24,9 @@ public class Voucher {
 
     public int getIdGuru() { return idGuru; }
     public void setIdGuru(int idGuru) { this.idGuru = idGuru; }
+    
+    public String getBulan(){return bulan;}
+    public void setBulan (String bulan){ this.bulan = bulan;}
 
     public String getNamaGuru() { return namaGuru; }
     public void setNamaGuru(String namaGuru) { this.namaGuru = namaGuru; }

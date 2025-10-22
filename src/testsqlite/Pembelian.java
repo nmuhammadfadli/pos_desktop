@@ -1,8 +1,3 @@
-/*
- * To change this license header, choose License Headers in Project Properties.
- * To change this template file, choose Tools | Templates
- * and open the template in the editor.
- */
 package testsqlite;
 
 import java.util.ArrayList;
@@ -11,6 +6,7 @@ import java.util.List;
 public class Pembelian {
     private String idPembelian;
     private String tglPembelian;
+    private String paymentMethod;        // NEW
     private Integer totalHarga;
     private List<DetailPembelian> details = new ArrayList<>();
 
@@ -21,6 +17,9 @@ public class Pembelian {
 
     public String getTglPembelian() { return tglPembelian; }
     public void setTglPembelian(String tglPembelian) { this.tglPembelian = tglPembelian; }
+
+    public String getPaymentMethod() { return paymentMethod; }
+    public void setPaymentMethod(String paymentMethod) { this.paymentMethod = paymentMethod; }
 
     public Integer getTotalHarga() { return totalHarga; }
     public void setTotalHarga(Integer totalHarga) { this.totalHarga = totalHarga; }

@@ -7,9 +7,7 @@ import java.util.List;
 
 /**
  * Dialog tambah / edit DetailBarang (UI untuk memasukkan barcode, stok, harga jual, tanggal exp,
- * memilih barang master, dan optional id_detail_pembelian).
- *
- * NOTE: Supplier selection dihilangkan karena schema detail_barang sudah tidak memiliki kolom id_supplier.
+ * memilih barang master, memilih supplier, dan optional id_detail_pembelian).
  */
 public class AddEditDetailDialog extends JDialog {
     private JTextField txtBarcode = new JTextField(20);
@@ -17,13 +15,15 @@ public class AddEditDetailDialog extends JDialog {
     private JTextField txtHarga = new JTextField(12);
     private JTextField txtTanggalExp = new JTextField(12);
     private JComboBox<String> cbBarang = new JComboBox<>();
+    private JComboBox<String> cbSupplier = new JComboBox<>();
     private JTextField txtIdDetailPembelian = new JTextField(8); // optional
 
     private DetailBarang detail;
     private boolean saved = false;
 
-    // mapping index -> id_barang
+    // mapping index -> id_barang / id_supplier
     private int[] barangIds = new int[0];
+    private int[] supplierIds = new int[0];
 
     public AddEditDetailDialog(Frame parent, DetailBarang d) {
         super(parent, true);
@@ -31,6 +31,7 @@ public class AddEditDetailDialog extends JDialog {
         setTitle(d == null ? "Tambah Detail Barang" : "Edit Detail Barang");
         initComponents();
         loadBarangList(); // isi combo barang
+        loadSupplierList(); // isi combo supplier
         if (d != null) fillForm(d);
         pack();
         setLocationRelativeTo(parent);
@@ -52,53 +53,63 @@ public class AddEditDetailDialog extends JDialog {
         gbc.weightx = 1.0;
         form.add(cbBarang, gbc);
 
-        // Row 1: Barcode
+        // Row 1: Supplier
         gbc.gridx = 0; gbc.gridy = 1;
         gbc.anchor = GridBagConstraints.EAST;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
-        form.add(new JLabel("Barcode:"), gbc);
+        form.add(new JLabel("Supplier (optional):"), gbc);
         gbc.gridx = 1; gbc.gridy = 1;
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        form.add(cbSupplier, gbc);
+
+        // Row 2: Barcode
+        gbc.gridx = 0; gbc.gridy = 2;
+        gbc.anchor = GridBagConstraints.EAST;
+        gbc.fill = GridBagConstraints.NONE;
+        form.add(new JLabel("Barcode:"), gbc);
+        gbc.gridx = 1; gbc.gridy = 2;
         gbc.anchor = GridBagConstraints.WEST;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         form.add(txtBarcode, gbc);
 
-        // Row 2: Stok
-        gbc.gridx = 0; gbc.gridy = 2;
+        // Row 3: Stok
+        gbc.gridx = 0; gbc.gridy = 3;
         gbc.anchor = GridBagConstraints.EAST;
         gbc.fill = GridBagConstraints.NONE;
         form.add(new JLabel("Stok:"), gbc);
-        gbc.gridx = 1; gbc.gridy = 2;
+        gbc.gridx = 1; gbc.gridy = 3;
         gbc.anchor = GridBagConstraints.WEST;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         form.add(txtStok, gbc);
 
-        // Row 3: Harga Jual
-        gbc.gridx = 0; gbc.gridy = 3;
+        // Row 4: Harga Jual
+        gbc.gridx = 0; gbc.gridy = 4;
         gbc.anchor = GridBagConstraints.EAST;
         gbc.fill = GridBagConstraints.NONE;
         form.add(new JLabel("Harga Jual:"), gbc);
-        gbc.gridx = 1; gbc.gridy = 3;
+        gbc.gridx = 1; gbc.gridy = 4;
         gbc.anchor = GridBagConstraints.WEST;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         form.add(txtHarga, gbc);
 
-        // Row 4: Tanggal Exp
-        gbc.gridx = 0; gbc.gridy = 4;
+        // Row 5: Tanggal Exp
+        gbc.gridx = 0; gbc.gridy = 5;
         gbc.anchor = GridBagConstraints.EAST;
         gbc.fill = GridBagConstraints.NONE;
         form.add(new JLabel("Tanggal Exp (YYYY-MM-DD):"), gbc);
-        gbc.gridx = 1; gbc.gridy = 4;
+        gbc.gridx = 1; gbc.gridy = 5;
         gbc.anchor = GridBagConstraints.WEST;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         form.add(txtTanggalExp, gbc);
 
-        // Row 5: optional id_detail_pembelian
-        gbc.gridx = 0; gbc.gridy = 5;
+        // Row 6: optional id_detail_pembelian
+        gbc.gridx = 0; gbc.gridy = 6;
         gbc.anchor = GridBagConstraints.EAST;
         gbc.fill = GridBagConstraints.NONE;
         form.add(new JLabel("ID Detail Pembelian (optional):"), gbc);
-        gbc.gridx = 1; gbc.gridy = 5;
+        gbc.gridx = 1; gbc.gridy = 6;
         gbc.anchor = GridBagConstraints.WEST;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         form.add(txtIdDetailPembelian, gbc);
@@ -141,6 +152,31 @@ public class AddEditDetailDialog extends JDialog {
         }
     }
 
+    private void loadSupplierList() {
+        try {
+            cbSupplier.removeAllItems();
+            // first option = (kosong)
+            cbSupplier.addItem("(kosong)");
+            java.util.List<Supplier> list = new SupplierDAO().findAll();
+            supplierIds = new int[list.size() + 1];
+            supplierIds[0] = -1; // index 0 -> null
+            int idx = 1;
+            int selectedIndex = 0;
+            for (Supplier s : list) {
+                cbSupplier.addItem(s.getNamaSupplier() + " (id=" + s.getIdSupplier() + ")");
+                supplierIds[idx] = s.getIdSupplier();
+                if (detail != null && detail.getIdSupplier() != null && detail.getIdSupplier().equals(s.getIdSupplier())) selectedIndex = idx;
+                idx++;
+            }
+            cbSupplier.setSelectedIndex(selectedIndex);
+        } catch (Exception ex) {
+            // jika gagal load supplier, tetap biarkan combo berisi (kosong)
+            cbSupplier.removeAllItems();
+            cbSupplier.addItem("(kosong)");
+            supplierIds = new int[]{ -1 };
+        }
+    }
+
     private void fillForm(DetailBarang d) {
         txtBarcode.setText(d.getBarcode() == null ? "" : d.getBarcode());
         txtStok.setText(String.valueOf(d.getStok()));
@@ -153,6 +189,16 @@ public class AddEditDetailDialog extends JDialog {
             for (int i = 0; i < barangIds.length; i++) {
                 if (barangIds[i] == d.getIdBarang()) {
                     cbBarang.setSelectedIndex(i);
+                    break;
+                }
+            }
+        }
+
+        // pilih supplier jika ada
+        if (d.getIdSupplier() != null && supplierIds != null) {
+            for (int i = 0; i < supplierIds.length; i++) {
+                if (supplierIds[i] == d.getIdSupplier()) {
+                    cbSupplier.setSelectedIndex(i);
                     break;
                 }
             }
@@ -179,6 +225,14 @@ public class AddEditDetailDialog extends JDialog {
             int selected = cbBarang.getSelectedIndex();
             int idBarang = (barangIds.length > 0 && selected >= 0 && selected < barangIds.length) ? barangIds[selected] : 0;
 
+            // supplier selection
+            Integer idSupplier = null;
+            int selSup = cbSupplier.getSelectedIndex();
+            if (selSup >= 0 && selSup < supplierIds.length) {
+                int sid = supplierIds[selSup];
+                if (sid != -1) idSupplier = sid;
+            }
+
             // optional id_detail_pembelian
             Integer idDetailPembelian = null;
             String idDetStr = txtIdDetailPembelian.getText().trim();
@@ -196,6 +250,7 @@ public class AddEditDetailDialog extends JDialog {
             detail.setHargaJual(harga);
             detail.setTanggalExp(tExp.isEmpty() ? null : tExp);
             detail.setIdBarang(idBarang);
+            detail.setIdSupplier(idSupplier);
             detail.setIdDetailPembelian(idDetailPembelian);
 
             saved = true;

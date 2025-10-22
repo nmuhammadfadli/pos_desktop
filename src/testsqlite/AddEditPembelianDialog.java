@@ -14,6 +14,7 @@ public class AddEditPembelianDialog extends JDialog {
 
     private JTextField txtIdPembelian = new JTextField(20);
     private JTextField txtTglPembelian = new JTextField(12); // user can supply date string (yyyy-MM-dd)
+    private JComboBox<String> cbPaymentMethod; // NEW
     private DefaultTableModel detailModel;
     private JTable tblDetails;
 
@@ -32,7 +33,7 @@ public class AddEditPembelianDialog extends JDialog {
     private void initComponents() {
         setLayout(new BorderLayout(8, 8));
 
-        // --- header (ID + tanggal) ---
+        // --- header (ID + tanggal + payment method) ---
         JPanel top = new JPanel(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(6, 8, 6, 8);
@@ -57,6 +58,19 @@ public class AddEditPembelianDialog extends JDialog {
         gbc.weightx = 1.0;
         txtTglPembelian.setText(java.time.LocalDate.now().toString());
         top.add(txtTglPembelian, gbc);
+
+        // Payment method row (NEW)
+        gbc.gridx = 0; gbc.gridy = 2;
+        gbc.anchor = GridBagConstraints.EAST;
+        gbc.fill = GridBagConstraints.NONE;
+        top.add(new JLabel("Payment Method:"), gbc);
+        gbc.gridx = 1; gbc.gridy = 2;
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        String[] methods = new String[] {"CASH", "TRANSFER", "CREDIT"};
+        cbPaymentMethod = new JComboBox<>(methods);
+        cbPaymentMethod.setSelectedItem("CASH");
+        top.add(cbPaymentMethod, gbc);
 
         add(top, BorderLayout.NORTH);
 
@@ -171,79 +185,81 @@ public class AddEditPembelianDialog extends JDialog {
         }
     }
 
-  // ... di dalam class AddEditPembelianDialog ...
+    private void onSave() {
+        String id = txtIdPembelian.getText().trim();
+        String tgl = txtTglPembelian.getText().trim();
+        if (tgl.isEmpty()) { JOptionPane.showMessageDialog(this, "Tanggal harus diisi"); return; }
+        if (pembelian.getDetails() == null || pembelian.getDetails().isEmpty()) { JOptionPane.showMessageDialog(this, "Tambahkan minimal 1 detail"); return; }
 
-private void onSave() {
-    String id = txtIdPembelian.getText().trim();
-    String tgl = txtTglPembelian.getText().trim();
-    if (tgl.isEmpty()) { JOptionPane.showMessageDialog(this, "Tanggal harus diisi"); return; }
-    if (pembelian.getDetails() == null || pembelian.getDetails().isEmpty()) { JOptionPane.showMessageDialog(this, "Tambahkan minimal 1 detail"); return; }
+        // validate date
+        try { java.time.LocalDate.parse(tgl); } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Format tanggal harus yyyy-MM-dd", "Input error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
 
-    // validate date
-    try { java.time.LocalDate.parse(tgl); } catch (Exception ex) {
-        JOptionPane.showMessageDialog(this, "Format tanggal harus yyyy-MM-dd", "Input error", JOptionPane.ERROR_MESSAGE);
-        return;
-    }
+        // jika id kosong -> generate otomatis
+        if (id.isEmpty()) {
+            id = generatePembelianId();
+            txtIdPembelian.setText(id);
+        }
 
-    // jika id kosong -> generate otomatis
-    if (id.isEmpty()) {
-        id = generatePembelianId();
-        txtIdPembelian.setText(id);
-    }
-
-    // cek duplikat
-    try {
-        PembelianDAO dao = new PembelianDAO();
-        if (dao.exists(id)) {
-            int opt = JOptionPane.showConfirmDialog(this,
-                    "ID pembelian '" + id + "' sudah ada. Buat ID baru otomatis?", "ID sudah ada",
-                    JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-            if (opt == JOptionPane.YES_OPTION) {
-                id = generatePembelianId();
-                txtIdPembelian.setText(id);
-            } else {
-                return; // batalkan simpan
+        // cek duplikat
+        try {
+            PembelianDAO dao = new PembelianDAO();
+            if (dao.exists(id)) {
+                int opt = JOptionPane.showConfirmDialog(this,
+                        "ID pembelian '" + id + "' sudah ada. Buat ID baru otomatis?", "ID sudah ada",
+                        JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+                if (opt == JOptionPane.YES_OPTION) {
+                    id = generatePembelianId();
+                    txtIdPembelian.setText(id);
+                } else {
+                    return; // batalkan simpan
+                }
             }
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Gagal cek ID: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+            return;
         }
-    } catch (Exception ex) {
-        JOptionPane.showMessageDialog(this, "Gagal cek ID: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-        return;
-    }
 
-    pembelian.setIdPembelian(id);
-    pembelian.setTglPembelian(tgl);
+        pembelian.setIdPembelian(id);
+        pembelian.setTglPembelian(tgl);
 
-    // compute total
-    long totalLong = 0L;
-    for (DetailPembelian d : pembelian.getDetails()) {
-        Integer harga = d.getHargaBeli() == null ? 0 : d.getHargaBeli();
-        Integer stok = d.getStok() == null ? 0 : d.getStok();
-        Integer subtotal = d.getSubtotal() == null ? 0 : d.getSubtotal();
-        if (subtotal == 0) {
-            long calc = (long) harga * (long) stok;
-            subtotal = (int) Math.min(calc, Integer.MAX_VALUE);
-            d.setSubtotal(subtotal);
+        // set payment method (NEW)
+        String selMethod = (String) cbPaymentMethod.getSelectedItem();
+        pembelian.setPaymentMethod(selMethod == null ? "CASH" : selMethod);
+
+        // compute total
+        long totalLong = 0L;
+        for (DetailPembelian d : pembelian.getDetails()) {
+            Integer harga = d.getHargaBeli() == null ? 0 : d.getHargaBeli();
+            Integer stok = d.getStok() == null ? 0 : d.getStok();
+            Integer subtotal = d.getSubtotal() == null ? 0 : d.getSubtotal();
+            if (subtotal == 0) {
+                long calc = (long) harga * (long) stok;
+                subtotal = (int) Math.min(calc, Integer.MAX_VALUE);
+                d.setSubtotal(subtotal);
+            }
+            totalLong += subtotal;
+            if (totalLong > Integer.MAX_VALUE) totalLong = Integer.MAX_VALUE;
         }
-        totalLong += subtotal;
-        if (totalLong > Integer.MAX_VALUE) totalLong = Integer.MAX_VALUE;
+        pembelian.setTotalHarga((int) totalLong);
+
+
+        try {
+            new PembelianDAO().insertPembelianWithDetails(pembelian);
+            saved = true;
+            setVisible(false);
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Gagal menyimpan pembelian: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+        }
     }
-    pembelian.setTotalHarga((int) totalLong);
 
-
-    try {
-        new PembelianDAO().insertPembelianWithDetails(pembelian);
-        saved = true;
-        setVisible(false);
-    } catch (Exception ex) {
-        JOptionPane.showMessageDialog(this, "Gagal menyimpan pembelian: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+    private String generatePembelianId() {
+        String ts = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        int rnd = (int) (Math.random() * 900) + 100;
+        return "PB-" + ts + "-" + rnd;
     }
-}
-
-private String generatePembelianId() {
-    String ts = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
-    int rnd = (int) (Math.random() * 900) + 100;
-    return "PB-" + ts + "-" + rnd;
-}
 
     private void onCancel() {
         saved = false;

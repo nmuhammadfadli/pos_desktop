@@ -31,10 +31,11 @@ public class DatabaseHelper {
              Statement stmt = conn.createStatement()) {
 
             // enable pragma early
+                      // pragmas
             try { stmt.execute("PRAGMA foreign_keys = ON;"); } catch (Throwable t) {}
             try { stmt.execute("PRAGMA journal_mode = WAL;"); } catch (Throwable t) {}
 
-            // ---------------- reference tables ----------------
+            // reference tables
             stmt.execute("CREATE TABLE IF NOT EXISTS data_kategori (" +
                     "id_kategori VARCHAR(10) PRIMARY KEY, " +
                     "nama_kategori TEXT NOT NULL)");
@@ -51,44 +52,50 @@ public class DatabaseHelper {
                     "alamat_supplier TEXT, " +
                     "notelp_supplier TEXT)");
 
-            // ---------------- main item table ----------------
+            // barang
             stmt.execute("CREATE TABLE IF NOT EXISTS barang (" +
                     "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
                     "nama TEXT NOT NULL, " +
                     "id_kategori VARCHAR(10) NOT NULL, " +
                     "FOREIGN KEY(id_kategori) REFERENCES data_kategori(id_kategori))");
 
-            // ---------------- pembelian tables (header + detail) ----------------
+            // pembelian header
             stmt.execute("CREATE TABLE IF NOT EXISTS data_pembelian (" +
                     "id_pembelian TEXT PRIMARY KEY, " +
                     "tgl_pembelian TEXT NOT NULL, " +
+                    "payment_method TEXT NOT NULL DEFAULT 'CASH', " +
                     "total_harga INTEGER NOT NULL DEFAULT 0)");
 
+            // detail_pembelian (line items)
             stmt.execute("CREATE TABLE IF NOT EXISTS detail_pembelian (" +
                     "id_detail_pembelian INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                    "id_pembelian TEXT NOT NULL, " +
+                    "id_barang INTEGER NOT NULL, " +
+                    "id_supplier INTEGER NOT NULL, " +
                     "harga_beli INTEGER NOT NULL, " +
                     "stok INTEGER NOT NULL, " +
                     "subtotal INTEGER NOT NULL, " +
-                    "id_supplier INTEGER NOT NULL, " +
-                    "id_pembelian TEXT NOT NULL, " +
-                    "id_detail_barang INTEGER NOT NULL, " +
-                    "FOREIGN KEY(id_supplier) REFERENCES data_supplier(id_supplier), " +
-                    "FOREIGN KEY(id_pembelian) REFERENCES data_pembelian(id_pembelian), " +
-                    "FOREIGN KEY(id_detail_barang) REFERENCES detail_barang(id_detail_barang))");
+                    "FOREIGN KEY(id_pembelian) REFERENCES data_pembelian(id_pembelian) ON DELETE CASCADE, " +
+                    "FOREIGN KEY(id_barang) REFERENCES barang(id) ON DELETE RESTRICT, " +
+                    "FOREIGN KEY(id_supplier) REFERENCES data_supplier(id_supplier) ON DELETE RESTRICT" +
+                    ")");
 
-            // ---------------- detail_barang (WITHOUT id_supplier) ----------------
+            // detail_barang (batches) - includes id_supplier + optional id_detail_pembelian (to trace when it created a new batch)
             stmt.execute("CREATE TABLE IF NOT EXISTS detail_barang (" +
                     "id_detail_barang INTEGER PRIMARY KEY AUTOINCREMENT, " +
-                    "barcode TEXT, " +
+                    "id_barang INTEGER NOT NULL, " +
+                    "id_supplier INTEGER, " +
                     "stok INTEGER NOT NULL DEFAULT 0, " +
                     "harga_jual TEXT NOT NULL, " +
                     "tanggal_exp TEXT, " +
-                    "id_barang INTEGER NOT NULL, " +
+                    "barcode TEXT, " +
                     "id_detail_pembelian INTEGER, " +
-                    "FOREIGN KEY (id_barang) REFERENCES barang(id), " +
-                    "FOREIGN KEY (id_detail_pembelian) REFERENCES detail_pembelian(id_detail_pembelian))");
+                    "FOREIGN KEY (id_barang) REFERENCES barang(id) ON DELETE CASCADE, " +
+                    "FOREIGN KEY (id_supplier) REFERENCES data_supplier(id_supplier) ON DELETE SET NULL, " +
+                    "FOREIGN KEY (id_detail_pembelian) REFERENCES detail_pembelian(id_detail_pembelian) ON DELETE CASCADE" +
+                    ")");
 
-            // ---------------- other tables (voucher, transaksi, etc.) ----------------
+            // other tables (voucher, transaksi, etc.)
             stmt.execute("CREATE TABLE IF NOT EXISTS kode_voucher (" +
                     "id_voucher INTEGER PRIMARY KEY AUTOINCREMENT, " +
                     "kode TEXT UNIQUE, " +
@@ -113,7 +120,7 @@ public class DatabaseHelper {
                     "id_detail_penjualan INTEGER PRIMARY KEY AUTOINCREMENT, " +
                     "id_transaksi INTEGER NOT NULL, " +
                     "id_detail_barang INTEGER NOT NULL, " +
-                    "jumlah_barang INTEGER NOT NULL, " +
+                    "stok INTEGER NOT NULL, " +
                     "harga_unit TEXT NOT NULL, " +
                     "subtotal TEXT NOT NULL, " +
                     "FOREIGN KEY (id_transaksi) REFERENCES transaksi_penjualan(id_transaksi))");
@@ -134,47 +141,36 @@ public class DatabaseHelper {
                     "created_at TEXT DEFAULT (datetime('now')), " +
                     "status TEXT DEFAULT 'OPEN')");
 
-            // ---------------- indexes for performance ----------------
-            try { stmt.execute("CREATE INDEX IF NOT EXISTS idx_detail_barang_id_detail_pembelian ON detail_barang(id_detail_pembelian)"); } catch (Throwable t) {}
+      // indexes
+            try { stmt.execute("CREATE INDEX IF NOT EXISTS idx_detail_barang_idx ON detail_barang(id_barang, id_supplier, harga_jual)"); } catch (Throwable t) {}
             try { stmt.execute("CREATE INDEX IF NOT EXISTS idx_detail_pembelian_id_barang ON detail_pembelian(id_barang)"); } catch (Throwable t) {}
             try { stmt.execute("CREATE INDEX IF NOT EXISTS idx_detail_pembelian_id_supplier ON detail_pembelian(id_supplier)"); } catch (Throwable t) {}
 
-            // ---------------- triggers: sync detail_barang from detail_pembelian ----------------
-            // Insert: when a purchase detail is created, create a corresponding detail_barang batch (if not exists)
+            // trigger: merge-on-insert behavior
             try {
                 stmt.execute(
-                    "CREATE TRIGGER IF NOT EXISTS trg_dp_after_insert_create_db " +
+                    "CREATE TRIGGER IF NOT EXISTS trg_after_insert_detail_pembelian_merge " +
                     "AFTER INSERT ON detail_pembelian " +
                     "FOR EACH ROW " +
                     "BEGIN " +
-                    "  INSERT OR IGNORE INTO detail_barang (barcode, stok, harga_jual, tanggal_exp, id_barang, id_detail_pembelian) " +
-                    "  VALUES (NULL, NEW.stok, CAST(NEW.harga_beli AS TEXT), NULL, NEW.id_barang, NEW.id_detail_pembelian);" +
+                    "  -- try to add to existing matching batch (same barang, supplier, harga)\n" +
+                    "  UPDATE detail_barang SET stok = stok + NEW.stok " +
+                    "    WHERE id_barang = NEW.id_barang AND id_supplier = NEW.id_supplier AND harga_jual = CAST(NEW.harga_beli AS TEXT);\n" +
+                    "  -- if no batch existed, create a new batch and store id_detail_pembelian there\n" +
+                    "  INSERT INTO detail_barang (id_barang, id_supplier, stok, harga_jual, tanggal_exp, barcode, id_detail_pembelian) " +
+                    "    SELECT NEW.id_barang, NEW.id_supplier, NEW.stok, CAST(NEW.harga_beli AS TEXT), NULL, NULL, NEW.id_detail_pembelian " +
+                    "    WHERE NOT EXISTS (SELECT 1 FROM detail_barang WHERE id_barang = NEW.id_barang AND id_supplier = NEW.id_supplier AND harga_jual = CAST(NEW.harga_beli AS TEXT));\n" +
                     "END;"
                 );
             } catch (Throwable t) {
-                System.err.println("warning creating trigger trg_dp_after_insert_create_db: " + t.getMessage());
+                System.err.println("warning creating trg_after_insert_detail_pembelian_merge: " + t.getMessage());
             }
 
-            // Update: sync stok & harga_jual when purchase detail updated
+            // trigger: when a purchase detail is deleted, remove batch rows that were created pointing to it
+            // (only affects batches that saved id_detail_pembelian; merged batches without that id remain untouched)
             try {
                 stmt.execute(
-                    "CREATE TRIGGER IF NOT EXISTS trg_dp_after_update_sync_db " +
-                    "AFTER UPDATE ON detail_pembelian " +
-                    "FOR EACH ROW " +
-                    "WHEN NEW.id_detail_pembelian IS NOT NULL " +
-                    "BEGIN " +
-                    "  UPDATE detail_barang SET stok = NEW.stok, harga_jual = CAST(NEW.harga_beli AS TEXT) " +
-                    "  WHERE id_detail_pembelian = NEW.id_detail_pembelian; " +
-                    "END;"
-                );
-            } catch (Throwable t) {
-                System.err.println("warning creating trigger trg_dp_after_update_sync_db: " + t.getMessage());
-            }
-
-            // Delete: if purchase detail removed, remove corresponding batch row (optional but kept)
-            try {
-                stmt.execute(
-                    "CREATE TRIGGER IF NOT EXISTS trg_dp_after_delete_remove_db " +
+                    "CREATE TRIGGER IF NOT EXISTS trg_after_delete_detail_pembelian_cleanup " +
                     "AFTER DELETE ON detail_pembelian " +
                     "FOR EACH ROW " +
                     "BEGIN " +
@@ -182,12 +178,11 @@ public class DatabaseHelper {
                     "END;"
                 );
             } catch (Throwable t) {
-                System.err.println("warning creating trigger trg_dp_after_delete_remove_db: " + t.getMessage());
+                System.err.println("warning creating trg_after_delete_detail_pembelian_cleanup: " + t.getMessage());
             }
 
-            // ---------------- sample data jika DB baru ----------------
+            // sample data if db new
             if (!existed) {
-                // ensure default kategori
                 try (PreparedStatement ps = conn.prepareStatement(
                         "INSERT OR IGNORE INTO data_kategori (id_kategori, nama_kategori) VALUES (?, ?)")) {
                     ps.setString(1, "KTG01");
@@ -195,7 +190,6 @@ public class DatabaseHelper {
                     ps.executeUpdate();
                 }
 
-                // sample barang
                 try (PreparedStatement ps = conn.prepareStatement(
                         "INSERT INTO barang (nama, id_kategori) VALUES (?, ?)")) {
                     ps.setString(1, "Kopi Bondowoso");
@@ -209,7 +203,6 @@ public class DatabaseHelper {
                     System.err.println("warning inserting sample barang: " + t.getMessage());
                 }
 
-                // sample supplier(s)
                 try (PreparedStatement ps = conn.prepareStatement(
                         "INSERT INTO data_supplier (nama_supplier, alamat_supplier, notelp_supplier) VALUES (?, ?, ?)")) {
                     ps.setString(1, "Supplier A");
@@ -225,39 +218,40 @@ public class DatabaseHelper {
                     System.err.println("warning inserting sample suppliers: " + t.getMessage());
                 }
 
-                // sample pembelian header + detail (this will auto-create detail_barang via trigger)
+                // sample pembelian header
                 try (PreparedStatement psHead = conn.prepareStatement(
-                        "INSERT INTO data_pembelian (id_pembelian, tgl_pembelian, total_harga) VALUES (?, ?, ?)")) {
+                        "INSERT INTO data_pembelian (id_pembelian, tgl_pembelian, payment_method, total_harga) VALUES (?, ?, ?, ?)")) {
                     psHead.setString(1, "PB-20251019-001");
                     psHead.setString(2, "2025-10-19");
-                    psHead.setInt(3, 170000);
+                    psHead.setString(3, "CREDIT");
+                    psHead.setInt(4, 170000);
                     psHead.executeUpdate();
                 } catch (Throwable t) {
                     System.err.println("warning inserting sample pembelian header: " + t.getMessage());
                 }
 
+                // sample detail_pembelian (these will trigger merge/insert into detail_barang)
                 try (PreparedStatement psDetail = conn.prepareStatement(
-                        "INSERT INTO detail_pembelian (harga_beli, stok, subtotal, id_supplier, id_pembelian, id_detail_barang) VALUES (?, ?, ?, ?, ?, ?)")) {
-                    psDetail.setInt(1, 50000);
-                    psDetail.setInt(2, 2);
-                    psDetail.setInt(3, 100000);
-                    psDetail.setInt(4, 1); // supplier A
-                    psDetail.setString(5, "PB-20251019-001");
-                    psDetail.setInt(6, 1); // barang id 1
+                        "INSERT INTO detail_pembelian (id_pembelian, id_barang, id_supplier, harga_beli, stok, subtotal) VALUES (?, ?, ?, ?, ?, ?)")) {
+                    psDetail.setString(1, "PB-20251019-001");
+                    psDetail.setInt(2, 1); // barang id 1
+                    psDetail.setInt(3, 1); // supplier A
+                    psDetail.setInt(4, 50000);
+                    psDetail.setInt(5, 2);
+                    psDetail.setInt(6, 100000);
                     psDetail.executeUpdate();
 
-                    psDetail.setInt(1, 70000);
-                    psDetail.setInt(2, 1);
-                    psDetail.setInt(3, 70000);
-                    psDetail.setInt(4, 2); // supplier B
-                    psDetail.setString(5, "PB-20251019-001");
-                    psDetail.setInt(6, 2); // barang id 2
+                    psDetail.setString(1, "PB-20251019-001");
+                    psDetail.setInt(2, 2); // barang id 2
+                    psDetail.setInt(3, 2); // supplier B
+                    psDetail.setInt(4, 70000);
+                    psDetail.setInt(5, 1);
+                    psDetail.setInt(6, 70000);
                     psDetail.executeUpdate();
                 } catch (Throwable t) {
                     System.err.println("warning inserting sample detail_pembelian: " + t.getMessage());
                 }
 
-                // sample voucher
                 try (PreparedStatement ps = conn.prepareStatement(
                         "INSERT INTO kode_voucher (kode,id_guru,current_balance) VALUES (?,?,?)")) {
                     ps.setString(1, "VCHR-001");
@@ -334,69 +328,118 @@ public class DatabaseHelper {
     }
 
     // ------------------ CRUD Voucher ------------------
-    public static List<Voucher> getAllVouchers() throws SQLException {
-        List<Voucher> list = new ArrayList<>();
-        String sql = "SELECT id_voucher, kode, current_balance FROM kode_voucher ORDER BY id_voucher";
-        try (Connection conn = getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
-            while (rs.next()) {
+public static List<Voucher> getAllVouchers() throws SQLException {
+    List<Voucher> list = new ArrayList<>();
+    String sql = "SELECT a.id_voucher, a.kode, a.current_balance, b.nama_guru, a.bulan FROM kode_voucher a LEFT JOIN data_guru b ON a.id_guru = b.id_guru ORDER BY a.id_voucher";
+    
+    try (Connection conn = getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql);
+         ResultSet rs = ps.executeQuery()) {
+        while (rs.next()) {
+            String bal = rs.getString("current_balance");
+            BigDecimal b = (bal == null || bal.trim().isEmpty()) ? BigDecimal.ZERO : new BigDecimal(bal);
+            
+            Voucher v = new Voucher();
+            v.setIdVoucher(rs.getInt("id_voucher"));
+            v.setKode(rs.getString("kode"));
+            v.setCurrentBalance(b);
+            v.setNamaGuru(rs.getString("nama_guru")); 
+            v.setBulan(rs.getString("bulan"));// ← tambahan baru
+            list.add(v);
+        }
+    }
+    return list;
+}
+
+public static Voucher findVoucherById(int idVoucher) throws SQLException {
+    String sql = "SELECT a.id_voucher, a.kode, a.current_balance, b.nama_guru FROM kode_voucher a LEFT JOIN data_guru b ON a.id_guru = b.id_guru WHERE a.id_voucher = ? ";
+    
+    try (Connection conn = getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql)) {
+        ps.setInt(1, idVoucher);
+        try (ResultSet rs = ps.executeQuery()) {
+            if (rs.next()) {
                 String bal = rs.getString("current_balance");
                 BigDecimal b = (bal == null || bal.trim().isEmpty()) ? BigDecimal.ZERO : new BigDecimal(bal);
+                
                 Voucher v = new Voucher();
                 v.setIdVoucher(rs.getInt("id_voucher"));
                 v.setKode(rs.getString("kode"));
                 v.setCurrentBalance(b);
-                list.add(v);
+                v.setNamaGuru(rs.getString("nama_guru")); // ← tambahan baru
+                return v;
             }
         }
-        return list;
     }
+    return null;
+}
 
-    public static Voucher findVoucherById(int idVoucher) throws SQLException {
-        String sql = "SELECT id_voucher, kode, current_balance FROM kode_voucher WHERE id_voucher = ?";
-        try (Connection conn = getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, idVoucher);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    String bal = rs.getString("current_balance");
-                    BigDecimal b = (bal == null || bal.trim().isEmpty()) ? BigDecimal.ZERO : new BigDecimal(bal);
-                    Voucher v = new Voucher();
-                    v.setIdVoucher(rs.getInt("id_voucher"));
-                    v.setKode(rs.getString("kode"));
-                    v.setCurrentBalance(b);
-                    return v;
-                }
-            }
+
+  public static int insertVoucher(Voucher v) throws SQLException {
+    String sql = "INSERT INTO kode_voucher (kode, bulan, id_guru, current_balance) VALUES (?, ?, ?, ?)";
+    try (Connection conn = getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+
+        // 1) kode
+        ps.setString(1, v.getKode());
+
+        // 2) bulan (String) - treat empty/null as NULL in DB
+        String bulan = v.getBulan();
+        if (bulan == null || bulan.trim().isEmpty()) {
+            ps.setNull(2, java.sql.Types.VARCHAR);
+        } else {
+            ps.setString(2, bulan.trim());
         }
-        return null;
-    }
 
-    public static int insertVoucher(Voucher v) throws SQLException {
-        String sql = "INSERT INTO kode_voucher (kode, id_guru, current_balance) VALUES (?, ?, ?)";
-        try (Connection conn = getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
-            ps.setString(1, v.getKode());
-            ps.setObject(2, null);
-            ps.setString(3, v.getCurrentBalance() == null ? BigDecimal.ZERO.toPlainString() : v.getCurrentBalance().toPlainString());
-            ps.executeUpdate();
-            try (ResultSet g = ps.getGeneratedKeys()) {
-                if (g.next()) return g.getInt(1);
-            }
+        // 3) id_guru - modelmu pakai int; treat 0 sebagai "tidak ada" -> simpan NULL di DB
+        int idGuru = v.getIdGuru();
+        if (idGuru == 0) {
+            ps.setNull(3, java.sql.Types.INTEGER);
+        } else {
+            ps.setInt(3, idGuru);
         }
-        return -1;
-    }
 
-    public static void updateVoucherBalance(int idVoucher, BigDecimal newBalance) throws SQLException {
-        String sql = "UPDATE kode_voucher SET current_balance = ? WHERE id_voucher = ?";
-        try (Connection conn = getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, newBalance.toPlainString());
-            ps.setInt(2, idVoucher);
-            ps.executeUpdate();
+        // 4) current_balance (simpan sebagai string dari BigDecimal)
+        BigDecimal bal = v.getCurrentBalance() == null ? BigDecimal.ZERO : v.getCurrentBalance();
+        ps.setString(4, bal.toPlainString());
+
+        int updated = ps.executeUpdate();
+        if (updated == 0) {
+            throw new SQLException("Insert voucher gagal, tidak ada row yang tersisip.");
+        }
+
+        try (ResultSet g = ps.getGeneratedKeys()) {
+            if (g.next()) return g.getInt(1);
         }
     }
+    return -1;
+}
+
+
+ public static void updateVoucher(int idVoucher, String kode, String bulan, Integer idGuru, BigDecimal currentBalance) throws SQLException {
+    String sql = "UPDATE kode_voucher SET kode = ?, bulan = ?, id_guru = ?, current_balance = ? WHERE id_voucher = ?";
+    try (Connection conn = getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql)) {
+
+        ps.setString(1, kode);
+
+        if (bulan == null || bulan.trim().isEmpty()) {
+            ps.setNull(2, java.sql.Types.VARCHAR);
+        } else {
+            ps.setString(2, bulan);
+        }
+
+        if (idGuru == null || idGuru == 0) {
+            ps.setNull(3, java.sql.Types.INTEGER);
+        } else {
+            ps.setInt(3, idGuru);
+        }
+
+        ps.setString(4, currentBalance == null ? BigDecimal.ZERO.toPlainString() : currentBalance.toPlainString());
+        ps.setInt(5, idVoucher);
+        ps.executeUpdate();
+    }
+}
 
     public static void deleteVoucher(int idVoucher) throws SQLException {
         try (Connection conn = getConnection();
@@ -407,32 +450,32 @@ public class DatabaseHelper {
     }
 
     // ------------------ CRUD Detail Barang (revised: NO id_supplier) ------------------
-    public static List<DetailBarang> getAllDetailBarang() throws SQLException {
-        List<DetailBarang> list = new ArrayList<>();
-        String sql = "SELECT id_detail_barang, barcode, stok, harga_jual, tanggal_exp, id_barang, id_detail_pembelian FROM detail_barang ORDER BY id_detail_barang";
-        try (Connection conn = getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
-            while (rs.next()) {
-                DetailBarang d = new DetailBarang();
-                d.setId(rs.getInt("id_detail_barang"));
-                d.setBarcode(rs.getString("barcode"));
-                d.setStok(rs.getInt("stok"));
-                String hargaStr = rs.getString("harga_jual");
-                d.setHargaJual((hargaStr == null || hargaStr.trim().isEmpty()) ? BigDecimal.ZERO : new BigDecimal(hargaStr));
-                d.setTanggalExp(rs.getString("tanggal_exp"));
-                d.setIdBarang(rs.getInt("id_barang"));
-                // if your DetailBarang model has idDetailPembelian field, set it here (optional)
-                try {
-                    DetailBarang.class.getMethod("setIdDetailPembelian", Integer.class).invoke(d, (Integer) rs.getObject("id_detail_pembelian"));
-                } catch (NoSuchMethodException nsme) {
-                    // model doesn't have field, ignore
-                } catch (Exception ignore) {}
-                list.add(d);
-            }
-        }
-        return list;
-    }
+//    public static List<DetailBarang> getAllDetailBarang() throws SQLException {
+//        List<DetailBarang> list = new ArrayList<>();
+//        String sql = "SELECT id_detail_barang, barcode, stok, harga_jual, tanggal_exp, id_barang, id_detail_pembelian FROM detail_barang ORDER BY id_detail_barang";
+//        try (Connection conn = getConnection();
+//             PreparedStatement ps = conn.prepareStatement(sql);
+//             ResultSet rs = ps.executeQuery()) {
+//            while (rs.next()) {
+//                DetailBarang d = new DetailBarang();
+//                d.setId(rs.getInt("id_detail_barang"));
+//                d.setBarcode(rs.getString("barcode"));
+//                d.setStok(rs.getInt("stok"));
+//                String hargaStr = rs.getString("harga_jual");
+//                d.setHargaJual((hargaStr == null || hargaStr.trim().isEmpty()) ? BigDecimal.ZERO : new BigDecimal(hargaStr));
+//                d.setTanggalExp(rs.getString("tanggal_exp"));
+//                d.setIdBarang(rs.getInt("id_barang"));
+//                // if your DetailBarang model has idDetailPembelian field, set it here (optional)
+//                try {
+//                    DetailBarang.class.getMethod("setIdDetailPembelian", Integer.class).invoke(d, (Integer) rs.getObject("id_detail_pembelian"));
+//                } catch (NoSuchMethodException nsme) {
+//                    // model doesn't have field, ignore
+//                } catch (Exception ignore) {}
+//                list.add(d);
+//            }
+//        }
+//        return list;
+//    }
 
     public static DetailBarang findDetailById(int idDetail) throws SQLException {
         String sql = "SELECT id_detail_barang, barcode, stok, harga_jual, tanggal_exp, id_barang, id_detail_pembelian FROM detail_barang WHERE id_detail_barang = ?";
@@ -459,6 +502,33 @@ public class DatabaseHelper {
             }
         }
         return null;
+    }
+      public static List<DetailBarang> getAllDetailBarang() throws SQLException {
+        List<DetailBarang> list = new ArrayList<>();
+        String sql = "SELECT id_detail_barang, id_barang, id_supplier, stok, harga_jual, tanggal_exp, barcode, id_detail_pembelian FROM detail_barang ORDER BY id_detail_barang";
+        try (Connection conn = getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                DetailBarang d = new DetailBarang();
+                d.setId(rs.getInt("id_detail_barang"));
+                d.setIdBarang(rs.getInt("id_barang"));
+                int idSup = rs.getInt("id_supplier");
+                if (rs.wasNull()) d.setIdSupplier(null); else d.setIdSupplier(idSup);
+                d.setStok(rs.getInt("stok"));
+                String hargaStr = rs.getString("harga_jual");
+                d.setHargaJual((hargaStr == null || hargaStr.trim().isEmpty()) ? BigDecimal.ZERO : new BigDecimal(hargaStr));
+                d.setTanggalExp(rs.getString("tanggal_exp"));
+                d.setBarcode(rs.getString("barcode"));
+                try {
+                    DetailBarang.class.getMethod("setIdDetailPembelian", Integer.class).invoke(d, (Integer) rs.getObject("id_detail_pembelian"));
+                } catch (NoSuchMethodException nsme) {
+                    // ignore if model not extended
+                } catch (Exception ignore) {}
+                list.add(d);
+            }
+        }
+        return list;
     }
 
     public static int insertDetailBarang(DetailBarang d) throws SQLException {

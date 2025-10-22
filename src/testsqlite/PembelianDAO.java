@@ -17,6 +17,7 @@ public class PembelianDAO {
         String createHeader = "CREATE TABLE IF NOT EXISTS data_pembelian ("
                 + "id_pembelian TEXT PRIMARY KEY, "
                 + "tgl_pembelian TEXT NOT NULL, "
+                + "payment_method TEXT NOT NULL DEFAULT 'CASH', "
                 + "total_harga INTEGER NOT NULL"
                 + ");";
 
@@ -61,7 +62,7 @@ public class PembelianDAO {
         if (p.getDetails() == null || p.getDetails().isEmpty())
             throw new IllegalArgumentException("Tambahkan minimal 1 detail");
 
-        String insHeader = "INSERT INTO data_pembelian (id_pembelian, tgl_pembelian, total_harga) VALUES (?, ?, ?)";
+        String insHeader = "INSERT INTO data_pembelian (id_pembelian, tgl_pembelian, payment_method, total_harga) VALUES (?, ?, ?, ?)";
         String insDetail = "INSERT INTO detail_pembelian (harga_beli, stok, subtotal, id_supplier, id_pembelian, id_barang) VALUES (?, ?, ?, ?, ?, ?)";
 
         try (Connection conn = DatabaseHelper.getConnection()) {
@@ -72,11 +73,12 @@ public class PembelianDAO {
                     throw new SQLException("ID pembelian '" + p.getIdPembelian() + "' sudah ada.");
                 }
 
-                // insert header
+                // insert header (include payment_method)
                 try (PreparedStatement ph = conn.prepareStatement(insHeader)) {
                     ph.setString(1, p.getIdPembelian());
                     ph.setString(2, p.getTglPembelian());
-                    ph.setInt(3, p.getTotalHarga() == null ? 0 : p.getTotalHarga());
+                    ph.setString(3, p.getPaymentMethod() == null ? "CASH" : p.getPaymentMethod());
+                    ph.setInt(4, p.getTotalHarga() == null ? 0 : p.getTotalHarga());
                     ph.executeUpdate();
                 }
 
@@ -116,7 +118,7 @@ public class PembelianDAO {
 
     public List<Pembelian> findAllPembelian() throws SQLException {
         List<Pembelian> out = new ArrayList<>();
-        String sql = "SELECT id_pembelian, tgl_pembelian, total_harga FROM data_pembelian ORDER BY tgl_pembelian DESC, id_pembelian DESC";
+        String sql = "SELECT id_pembelian, tgl_pembelian, payment_method, total_harga FROM data_pembelian ORDER BY tgl_pembelian DESC, id_pembelian DESC";
         try (Connection conn = DatabaseHelper.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
@@ -124,6 +126,7 @@ public class PembelianDAO {
                 Pembelian p = new Pembelian();
                 p.setIdPembelian(rs.getString("id_pembelian"));
                 p.setTglPembelian(rs.getString("tgl_pembelian"));
+                p.setPaymentMethod(rs.getString("payment_method"));
                 p.setTotalHarga(rs.getInt("total_harga"));
                 out.add(p);
             }

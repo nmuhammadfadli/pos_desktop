@@ -161,10 +161,10 @@ public class MainFrame extends JFrame {
         tabs.addTab("Supplier", pSupplier);
 
         // ---------------- Panel Detail Barang ----------------
-        JPanel pDetail = new JPanel(new BorderLayout());
-        // sesuaikan kolom dengan model DetailBarang (tidak termasuk id_detail_pembelian)
+         JPanel pDetail = new JPanel(new BorderLayout());
+        // sesuaikan kolom dengan model DetailBarang (menambahkan Id Supplier dan Id Detail Pembelian)
         detailModel = new DefaultTableModel(
-               new Object[]{"ID", "Barcode", "Stok", "Harga Jual", "Tanggal Exp", "Id Barang"}, 0) {
+               new Object[]{"ID", "Barcode", "Stok", "Harga Jual", "Tanggal Exp", "Id Barang", "Id Supplier", "Id Detail Pembelian"}, 0) {
            @Override public boolean isCellEditable(int r, int c) { return false; }
        };
 
@@ -182,7 +182,7 @@ public class MainFrame extends JFrame {
 
         // ---------------- Panel Pembelian ----------------
         JPanel pPembelian = new JPanel(new BorderLayout());
-        pembelianModel = new DefaultTableModel(new Object[]{"ID Pembelian", "Tanggal", "Total Harga"}, 0) {
+        pembelianModel = new DefaultTableModel(new Object[]{"ID Pembelian", "Tanggal", "Payment Method", "Total Harga"}, 0) {
             @Override public boolean isCellEditable(int r, int c) { return false; }
         };
         tblPembelian = new JTable(pembelianModel);
@@ -197,21 +197,32 @@ public class MainFrame extends JFrame {
         tabs.addTab("Pembelian", pPembelian);
 
         // ---------------- Panel Voucher ----------------
-        JPanel pVoucher = new JPanel(new BorderLayout());
-        voucherModel = new DefaultTableModel(new Object[]{"ID","Kode","Saldo"}, 0) {
-            @Override public boolean isCellEditable(int r,int c){ return false; }
-        };
-        tblVoucher = new JTable(voucherModel);
-        pVoucher.add(new JScrollPane(tblVoucher), BorderLayout.CENTER);
+      JPanel pVoucher = new JPanel(new BorderLayout());
+    // tambahkan kolom Id Guru dan Nama Guru
+   // di init(), Panel Voucher
+    voucherModel = new DefaultTableModel(new Object[]{"ID","Kode","Bulan","Nama Guru","Saldo"}, 0) {
+        @Override public boolean isCellEditable(int r,int c){ return false; }
+    };
 
-        JPanel vb = new JPanel();
-        JButton addV = new JButton("Tambah Voucher"); addV.addActionListener(ev -> onTambahVoucher());
-        JButton editV = new JButton("Edit Voucher"); editV.addActionListener(ev -> onEditVoucher());
-        JButton delV = new JButton("Hapus Voucher"); delV.addActionListener(ev -> onHapusVoucher());
-        JButton refV = new JButton("Refresh"); refV.addActionListener(ev -> loadVouchers());
-        vb.add(addV); vb.add(editV); vb.add(delV); vb.add(refV);
-        pVoucher.add(vb, BorderLayout.SOUTH);
-        tabs.addTab("Voucher", pVoucher);
+    tblVoucher = new JTable(voucherModel);
+
+    // opsional: atur lebar kolom agar Nama Guru terlihat rapi
+    tblVoucher.getColumnModel().getColumn(0).setPreferredWidth(50);   
+    tblVoucher.getColumnModel().getColumn(1).setPreferredWidth(120);    
+    tblVoucher.getColumnModel().getColumn(2).setPreferredWidth(200); 
+    tblVoucher.getColumnModel().getColumn(3).setPreferredWidth(100);
+    tblVoucher.getColumnModel().getColumn(4).setPreferredWidth(100);  
+
+    pVoucher.add(new JScrollPane(tblVoucher), BorderLayout.CENTER);
+
+    JPanel vb = new JPanel();
+    JButton addV = new JButton("Tambah Voucher"); addV.addActionListener(ev -> onTambahVoucher());
+    JButton editV = new JButton("Edit Voucher"); editV.addActionListener(ev -> onEditVoucher());
+    JButton delV = new JButton("Hapus Voucher"); delV.addActionListener(ev -> onHapusVoucher());
+    JButton refV = new JButton("Refresh"); refV.addActionListener(ev -> loadVouchers());
+    vb.add(addV); vb.add(editV); vb.add(delV); vb.add(refV);
+    pVoucher.add(vb, BorderLayout.SOUTH);
+    tabs.addTab("Voucher", pVoucher);
 
         // ---------------- Panel Transaksi ----------------
         JPanel pTrans = new JPanel(new FlowLayout());
@@ -329,7 +340,7 @@ public class MainFrame extends JFrame {
         }
     }
 
-    private void loadDetailBarang() {
+   private void loadDetailBarang() {
         try {
             List<DetailBarang> list = detailDao.findAll();
             detailModel.setRowCount(0);
@@ -341,7 +352,9 @@ public class MainFrame extends JFrame {
                        d.getStok(),
                        harga,
                        d.getTanggalExp(),
-                       d.getIdBarang()
+                       d.getIdBarang(),
+                       d.getIdSupplier() == null ? "-" : d.getIdSupplier(),
+                       d.getIdDetailPembelian() == null ? "-" : d.getIdDetailPembelian()
                });
            }
 
@@ -354,12 +367,13 @@ public class MainFrame extends JFrame {
     private void loadPembelian() {
         try {
             if (pembelianDAO == null) pembelianDAO = new PembelianDAO();
-            List<Pembelian> list = pembelianDAO.findAllPembelian(); // sesuai PembelianDAO yang kita buat
+            List<Pembelian> list = pembelianDAO.findAllPembelian(); 
             pembelianModel.setRowCount(0);
             for (Pembelian p : list) {
                 pembelianModel.addRow(new Object[]{
                         p.getIdPembelian(),
                         p.getTglPembelian(),
+                        p.getPaymentMethod(),
                         p.getTotalHarga()
                 });
             }
@@ -369,25 +383,29 @@ public class MainFrame extends JFrame {
         }
     }
 
-    private void loadVouchers() {
-        try {
-            List<Voucher> list = DatabaseHelper.getAllVouchers(); // gunakan DatabaseHelper supaya aman
-            voucherModel.setRowCount(0);
-            for (Voucher v : list) {
-                String saldo = v.getCurrentBalance() == null ? "0" : v.getCurrentBalance().toPlainString();
-                voucherModel.addRow(new Object[]{
-                        v.getIdVoucher(),
-                        v.getKode(),
-                        v.getIdGuru(),
-                        v.getNamaGuru(),
-                        saldo
-                });
-            }
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(this, "Gagal load voucher: " + ex.getMessage(),
-                    "Error", JOptionPane.ERROR_MESSAGE);
+  private void loadVouchers() {
+    try {
+        List<Voucher> list = DatabaseHelper.getAllVouchers(); // pastikan getAllVouchers menggunakan same SELECT
+        voucherModel.setRowCount(0);
+        for (Voucher v : list) {
+            String saldo = v.getCurrentBalance() == null ? "0" : v.getCurrentBalance().toPlainString();
+            String bulan = v.getBulan() == null ? "-" : v.getBulan();
+            String namaGuru = v.getNamaGuru() == null ? "-" : v.getNamaGuru();
+
+            voucherModel.addRow(new Object[]{
+                    v.getIdVoucher(),
+                    v.getKode(),
+                    bulan,
+                    namaGuru,
+                    saldo
+            });
         }
+    } catch (Exception ex) {
+        JOptionPane.showMessageDialog(this, "Gagal load voucher: " + ex.getMessage(),
+                "Error", JOptionPane.ERROR_MESSAGE);
     }
+}
+
 
     // ----------------- CRUD Barang -----------------
     private void onTambahBarang() {
@@ -611,7 +629,7 @@ public class MainFrame extends JFrame {
     }
 
     // ----------------- CRUD Detail Barang -----------------
-    private void onTambahDetail() {
+      private void onTambahDetail() {
         AddEditDetailDialog dlg = new AddEditDetailDialog(this, null);
         dlg.setVisible(true);
         if (dlg.isSaved()) {
@@ -748,48 +766,80 @@ public class MainFrame extends JFrame {
         }
     }
 
-    private void onEditVoucher() {
-        int r = tblVoucher.getSelectedRow();
-        if (r < 0) {
-            JOptionPane.showMessageDialog(this, "Pilih baris dulu.");
+  private void onEditVoucher() {
+    int r = tblVoucher.getSelectedRow();
+    if (r < 0) {
+        JOptionPane.showMessageDialog(this, "Pilih baris dulu.");
+        return;
+    }
+
+    try {
+        int id = Integer.parseInt(tblVoucher.getValueAt(r, 0).toString());
+        Voucher v = null;
+
+        // ambil voucher via DatabaseHelper terlebih dahulu
+        for (Voucher vv : DatabaseHelper.getAllVouchers()) {
+            if (vv.getIdVoucher() == id) { v = vv; break; }
+        }
+
+        // fallback ke DAO jika tidak ditemukan
+        if (v == null) {
+            v = new VoucherDAO().findById(id);
+        }
+
+        if (v == null) {
+            JOptionPane.showMessageDialog(this, "Voucher tidak ditemukan.");
             return;
         }
 
+        AddEditVoucherDialog dlg = new AddEditVoucherDialog(this, v);
+        dlg.setVisible(true);
+
+        if (!dlg.isSaved()) return;
+
+        // Ambil data hasil edit
+        Voucher edited = dlg.getVoucher();
+        int vid = edited.getIdVoucher();
+        String vkode = edited.getKode();
+        // getIdGuru() di modelmu berbentuk int -> akan auto-box ke Integer
+        Integer vIdGuru = edited.getIdGuru();
+        BigDecimal vBalance = edited.getCurrentBalance();
+        String vBulan = edited.getBulan(); // jika DatabaseHelper tidak handle bulan, VoucherDAO.update() akan mengurusnya
+
+        // coba update utama via DatabaseHelper.updateVoucher(id, kode, idGuru, currentBalance)
         try {
-            int id = Integer.parseInt(tblVoucher.getValueAt(r, 0).toString());
-            Voucher v = null;
-            // ambil voucher via DatabaseHelper
-            for (Voucher vv : DatabaseHelper.getAllVouchers()) if (vv.getIdVoucher() == id) { v = vv; break; }
-
-            if (v == null) {
-                // fallback ke VoucherDAO jika tersedia
-                v = new VoucherDAO().findById(id);
-            }
-
-            if (v == null) {
-                JOptionPane.showMessageDialog(this, "Voucher tidak ditemukan.");
+            DatabaseHelper.updateVoucher(vid, vkode, vBulan, vIdGuru, vBalance);
+        } catch (Exception exPrimary) {
+            // primary gagal -> coba fallback penuh via VoucherDAO.update(Voucher)
+            try {
+                // pastikan Voucher object memiliki semua field yang diperlukan (kode, idGuru, bulan, currentBalance, idVoucher)
+                // VoucherDAO.update akan meng-handle penyimpanan bulan (karena di DAO bulan disimpan sebagai String)
+                new VoucherDAO().update(edited);
+            } catch (Exception exFallback) {
+                // kedua cara gagal -> laporkan ke user
+                exPrimary.printStackTrace();
+                exFallback.printStackTrace();
+                JOptionPane.showMessageDialog(this,
+                        "Gagal memperbarui voucher:\n1) DatabaseHelper.updateVoucher error: " + exPrimary.getMessage() +
+                        "\n2) VoucherDAO.update error: " + exFallback.getMessage(),
+                        "Error", JOptionPane.ERROR_MESSAGE);
                 return;
             }
-
-            AddEditVoucherDialog dlg = new AddEditVoucherDialog(this, v);
-            dlg.setVisible(true);
-            if (dlg.isSaved()) {
-                // update via DatabaseHelper atau VoucherDAO
-                try {
-                    DatabaseHelper.updateVoucherBalance(dlg.getVoucher().getIdVoucher(), dlg.getVoucher().getCurrentBalance());
-                } catch (Exception ex) {
-                    // fallback
-                    new VoucherDAO().updateBalance(dlg.getVoucher().getIdVoucher(), dlg.getVoucher().getCurrentBalance());
-                }
-                JOptionPane.showMessageDialog(this, "Voucher diperbarui.");
-                loadVouchers();
-            }
-        } catch (NumberFormatException nfe) {
-            JOptionPane.showMessageDialog(this, "ID voucher tidak valid.", "Error", JOptionPane.ERROR_MESSAGE);
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(this, "Gagal edit voucher: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
         }
+
+        JOptionPane.showMessageDialog(this, "Voucher diperbarui.");
+        loadVouchers();
+
+    } catch (NumberFormatException nfe) {
+        JOptionPane.showMessageDialog(this, "ID voucher tidak valid.", "Error", JOptionPane.ERROR_MESSAGE);
+    }catch (Exception ex) {
+        JOptionPane.showMessageDialog(this, "Gagal edit voucher: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+        ex.printStackTrace();
     }
+}
+
+
+   
 
     private void onHapusVoucher() {
         int r = tblVoucher.getSelectedRow();

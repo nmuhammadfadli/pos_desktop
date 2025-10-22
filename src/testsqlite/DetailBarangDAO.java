@@ -5,11 +5,15 @@ import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * DAO untuk detail_barang (batches).
+ * Menangani kolom: id_detail_barang, id_barang, id_supplier (nullable), stok, harga_jual, tanggal_exp, barcode, id_detail_pembelian (nullable)
+ */
 public class DetailBarangDAO {
 
     public List<DetailBarang> findAll() throws SQLException {
         List<DetailBarang> list = new ArrayList<>();
-        String sql = "SELECT id_detail_barang, barcode, stok, harga_jual, tanggal_exp, id_barang, id_detail_pembelian FROM detail_barang ORDER BY id_detail_barang";
+        String sql = "SELECT id_detail_barang, barcode, stok, harga_jual, tanggal_exp, id_barang, id_supplier, id_detail_pembelian FROM detail_barang ORDER BY id_detail_barang";
         try (Connection conn = DatabaseHelper.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
@@ -22,7 +26,7 @@ public class DetailBarangDAO {
     }
 
     public DetailBarang findById(int idDetail) throws SQLException {
-        String sql = "SELECT id_detail_barang, barcode, stok, harga_jual, tanggal_exp, id_barang, id_detail_pembelian FROM detail_barang WHERE id_detail_barang = ?";
+        String sql = "SELECT id_detail_barang, barcode, stok, harga_jual, tanggal_exp, id_barang, id_supplier, id_detail_pembelian FROM detail_barang WHERE id_detail_barang = ?";
         try (Connection conn = DatabaseHelper.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, idDetail);
@@ -38,7 +42,7 @@ public class DetailBarangDAO {
      */
     public List<DetailBarang> findByBarangId(int idBarang) throws SQLException {
         List<DetailBarang> list = new ArrayList<>();
-        String sql = "SELECT id_detail_barang, barcode, stok, harga_jual, tanggal_exp, id_barang, id_detail_pembelian FROM detail_barang WHERE id_barang = ? ORDER BY id_detail_barang";
+        String sql = "SELECT id_detail_barang, barcode, stok, harga_jual, tanggal_exp, id_barang, id_supplier, id_detail_pembelian FROM detail_barang WHERE id_barang = ? ORDER BY id_detail_barang";
         try (Connection conn = DatabaseHelper.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, idBarang);
@@ -51,10 +55,9 @@ public class DetailBarangDAO {
 
     /**
      * Insert detail_barang. Mengembalikan id generated (atau -1 jika gagal)
-     * Note: kolom id_supplier sudah dihapus dari schema, jadi tidak diset di sini.
      */
     public int insert(DetailBarang d) throws SQLException {
-        String sql = "INSERT INTO detail_barang (barcode, stok, harga_jual, tanggal_exp, id_barang, id_detail_pembelian) VALUES (?, ?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO detail_barang (barcode, stok, harga_jual, tanggal_exp, id_barang, id_supplier, id_detail_pembelian) VALUES (?, ?, ?, ?, ?, ?, ?)";
         try (Connection conn = DatabaseHelper.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, d.getBarcode());
@@ -63,11 +66,11 @@ public class DetailBarangDAO {
             ps.setString(4, d.getTanggalExp());
             ps.setInt(5, d.getIdBarang());
 
-            if (d.getIdDetailPembelian() == null) {
-                ps.setNull(6, Types.INTEGER);
-            } else {
-                ps.setInt(6, d.getIdDetailPembelian());
-            }
+            if (d.getIdSupplier() == null) ps.setNull(6, Types.INTEGER);
+            else ps.setInt(6, d.getIdSupplier());
+
+            if (d.getIdDetailPembelian() == null) ps.setNull(7, Types.INTEGER);
+            else ps.setInt(7, d.getIdDetailPembelian());
 
             ps.executeUpdate();
             try (ResultSet g = ps.getGeneratedKeys()) {
@@ -81,7 +84,7 @@ public class DetailBarangDAO {
      * Update detail_barang
      */
     public void update(DetailBarang d) throws SQLException {
-        String sql = "UPDATE detail_barang SET barcode=?, stok=?, harga_jual=?, tanggal_exp=?, id_barang=?, id_detail_pembelian=? WHERE id_detail_barang=?";
+        String sql = "UPDATE detail_barang SET barcode=?, stok=?, harga_jual=?, tanggal_exp=?, id_barang=?, id_supplier=?, id_detail_pembelian=? WHERE id_detail_barang=?";
         try (Connection conn = DatabaseHelper.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, d.getBarcode());
@@ -90,13 +93,13 @@ public class DetailBarangDAO {
             ps.setString(4, d.getTanggalExp());
             ps.setInt(5, d.getIdBarang());
 
-            if (d.getIdDetailPembelian() == null) {
-                ps.setNull(6, Types.INTEGER);
-            } else {
-                ps.setInt(6, d.getIdDetailPembelian());
-            }
+            if (d.getIdSupplier() == null) ps.setNull(6, Types.INTEGER);
+            else ps.setInt(6, d.getIdSupplier());
 
-            ps.setInt(7, d.getId());
+            if (d.getIdDetailPembelian() == null) ps.setNull(7, Types.INTEGER);
+            else ps.setInt(7, d.getIdDetailPembelian());
+
+            ps.setInt(8, d.getId());
             ps.executeUpdate();
         }
     }
@@ -151,7 +154,7 @@ public class DetailBarangDAO {
      * Mengembalikan null jika tidak ada.
      */
     public DetailBarang getFirstAvailableDetail() throws SQLException {
-        String sql = "SELECT id_detail_barang, barcode, stok, harga_jual, tanggal_exp, id_barang, id_detail_pembelian FROM detail_barang WHERE stok > 0 LIMIT 1";
+        String sql = "SELECT id_detail_barang, barcode, stok, harga_jual, tanggal_exp, id_barang, id_supplier, id_detail_pembelian FROM detail_barang WHERE stok > 0 LIMIT 1";
         try (Connection conn = DatabaseHelper.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
@@ -171,18 +174,15 @@ public class DetailBarangDAO {
         d.setTanggalExp(rs.getString("tanggal_exp"));
         d.setIdBarang(rs.getInt("id_barang"));
 
+        // id_supplier nullable
+        int idSup = rs.getInt("id_supplier");
+        if (rs.wasNull()) d.setIdSupplier(null);
+        else d.setIdSupplier(idSup);
 
         // id_detail_pembelian nullable
         int idDet = rs.getInt("id_detail_pembelian");
-        if (rs.wasNull()) {
-            try {
-                d.setIdDetailPembelian(null);
-            } catch (NoSuchMethodError | Exception ignore) {}
-        } else {
-            try {
-                d.setIdDetailPembelian(idDet);
-            } catch (NoSuchMethodError | Exception ignore) {}
-        }
+        if (rs.wasNull()) d.setIdDetailPembelian(null);
+        else d.setIdDetailPembelian(idDet);
 
         return d;
     }
