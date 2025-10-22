@@ -1,8 +1,3 @@
-/*
- * To change this license header, choose License Headers in Project Properties.
- * To change this template file, choose Tools | Templates
- * and open the template in the editor.
- */
 package testsqlite;
 
 import java.math.BigDecimal;
@@ -15,6 +10,11 @@ public class Receivable {
     private BigDecimal amountOutstanding;
     private String createdAt;
     private String status; // OPEN / PARTIAL / PAID / CLOSED
+
+    // tambahan
+    private Integer voucherId;    // bisa null
+    private String voucherCode;   // kode voucher jika ada
+    private String ownerName;     // nama guru pemilik voucher jika ada
 
     public int getIdReceivable() { return idReceivable; }
     public void setIdReceivable(int idReceivable) { this.idReceivable = idReceivable; }
@@ -36,4 +36,14 @@ public class Receivable {
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+
+    // getters/setters tambahan
+    public Integer getVoucherId() { return voucherId; }
+    public void setVoucherId(Integer voucherId) { this.voucherId = voucherId; }
+
+    public String getVoucherCode() { return voucherCode; }
+    public void setVoucherCode(String voucherCode) { this.voucherCode = voucherCode; }
+
+    public String getOwnerName() { return ownerName; }
+    public void setOwnerName(String ownerName) { this.ownerName = ownerName; }
 }

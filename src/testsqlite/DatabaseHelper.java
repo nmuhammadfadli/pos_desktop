@@ -120,7 +120,7 @@ public class DatabaseHelper {
                     "id_detail_penjualan INTEGER PRIMARY KEY AUTOINCREMENT, " +
                     "id_transaksi INTEGER NOT NULL, " +
                     "id_detail_barang INTEGER NOT NULL, " +
-                    "stok INTEGER NOT NULL, " +
+                    "jumlah_barang INTEGER NOT NULL, " +
                     "harga_unit TEXT NOT NULL, " +
                     "subtotal TEXT NOT NULL, " +
                     "FOREIGN KEY (id_transaksi) REFERENCES transaksi_penjualan(id_transaksi))");

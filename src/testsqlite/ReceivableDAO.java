@@ -8,12 +8,19 @@ import java.util.List;
 /**
  * DAO untuk table 'receivable'
  * - nilai uang disimpan sebagai TEXT di DB (konversi ke BigDecimal di sini)
+ * - kini juga mengambil info voucher & nama guru via JOIN ke transaksi_penjualan -> kode_voucher -> data_guru
  */
 public class ReceivableDAO {
 
     public List<Receivable> findAll() throws SQLException {
         List<Receivable> list = new ArrayList<>();
-        String sql = "SELECT id_receivable, id_transaksi, amount_total, amount_paid, amount_outstanding, created_at, status FROM receivable ORDER BY created_at DESC";
+        String sql = "SELECT r.id_receivable, r.id_transaksi, r.amount_total, r.amount_paid, r.amount_outstanding, r.created_at, r.status, " +
+                     "t.id_voucher AS voucher_id, kv.kode AS voucher_code, g.nama_guru AS owner_name " +
+                     "FROM receivable r " +
+                     "LEFT JOIN transaksi_penjualan t ON r.id_transaksi = t.id_transaksi " +
+                     "LEFT JOIN kode_voucher kv ON t.id_voucher = kv.id_voucher " +
+                     "LEFT JOIN data_guru g ON kv.id_guru = g.id_guru " +
+                     "ORDER BY r.created_at DESC";
         try (Connection conn = DatabaseHelper.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
@@ -26,7 +33,14 @@ public class ReceivableDAO {
 
     public List<Receivable> findOpen() throws SQLException {
         List<Receivable> list = new ArrayList<>();
-        String sql = "SELECT id_receivable, id_transaksi, amount_total, amount_paid, amount_outstanding, created_at, status FROM receivable WHERE status <> 'PAID' ORDER BY created_at DESC";
+        String sql = "SELECT r.id_receivable, r.id_transaksi, r.amount_total, r.amount_paid, r.amount_outstanding, r.created_at, r.status, " +
+                     "t.id_voucher AS voucher_id, kv.kode AS voucher_code, g.nama_guru AS owner_name " +
+                     "FROM receivable r " +
+                     "LEFT JOIN transaksi_penjualan t ON r.id_transaksi = t.id_transaksi " +
+                     "LEFT JOIN kode_voucher kv ON t.id_voucher = kv.id_voucher " +
+                     "LEFT JOIN data_guru g ON kv.id_guru = g.id_guru " +
+                     "WHERE r.status <> 'PAID' " +
+                     "ORDER BY r.created_at DESC";
         try (Connection conn = DatabaseHelper.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
@@ -36,7 +50,13 @@ public class ReceivableDAO {
     }
 
     public Receivable findById(int id) throws SQLException {
-        String sql = "SELECT id_receivable, id_transaksi, amount_total, amount_paid, amount_outstanding, created_at, status FROM receivable WHERE id_receivable = ?";
+        String sql = "SELECT r.id_receivable, r.id_transaksi, r.amount_total, r.amount_paid, r.amount_outstanding, r.created_at, r.status, " +
+                     "t.id_voucher AS voucher_id, kv.kode AS voucher_code, g.nama_guru AS owner_name " +
+                     "FROM receivable r " +
+                     "LEFT JOIN transaksi_penjualan t ON r.id_transaksi = t.id_transaksi " +
+                     "LEFT JOIN kode_voucher kv ON t.id_voucher = kv.id_voucher " +
+                     "LEFT JOIN data_guru g ON kv.id_guru = g.id_guru " +
+                     "WHERE r.id_receivable = ?";
         try (Connection conn = DatabaseHelper.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, id);
@@ -48,7 +68,13 @@ public class ReceivableDAO {
     }
 
     public Receivable findByTransaksi(long idTransaksi) throws SQLException {
-        String sql = "SELECT id_receivable, id_transaksi, amount_total, amount_paid, amount_outstanding, created_at, status FROM receivable WHERE id_transaksi = ?";
+        String sql = "SELECT r.id_receivable, r.id_transaksi, r.amount_total, r.amount_paid, r.amount_outstanding, r.created_at, r.status, " +
+                     "t.id_voucher AS voucher_id, kv.kode AS voucher_code, g.nama_guru AS owner_name " +
+                     "FROM receivable r " +
+                     "LEFT JOIN transaksi_penjualan t ON r.id_transaksi = t.id_transaksi " +
+                     "LEFT JOIN kode_voucher kv ON t.id_voucher = kv.id_voucher " +
+                     "LEFT JOIN data_guru g ON kv.id_guru = g.id_guru " +
+                     "WHERE r.id_transaksi = ?";
         try (Connection conn = DatabaseHelper.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, idTransaksi);
@@ -87,9 +113,6 @@ public class ReceivableDAO {
 
     /**
      * Apply payment to receivable (partial or full). This method is atomic.
-     * - paymentAmount: jumlah yang dibayar sekarang
-     * - jika amount_outstanding setelah dikurangi paymentAmount = 0 => status = PAID
-     * - else status = PARTIAL (atau tetap OPEN)
      */
     public void applyPayment(int idReceivable, BigDecimal paymentAmount) throws SQLException {
         if (paymentAmount == null) paymentAmount = BigDecimal.ZERO;
@@ -107,7 +130,6 @@ public class ReceivableDAO {
                 BigDecimal newPaid = currentPaid.add(paymentAmount);
                 BigDecimal newOutstanding = outstanding.subtract(paymentAmount);
                 if (newOutstanding.compareTo(BigDecimal.ZERO) < 0) {
-                    // tidak boleh negative outstanding => treat overpayment: set outstanding 0, adjust paid accordingly
                     newOutstanding = BigDecimal.ZERO;
                 }
 
@@ -136,14 +158,23 @@ public class ReceivableDAO {
         Receivable r = new Receivable();
         r.setIdReceivable(rs.getInt("id_receivable"));
         r.setIdTransaksi(rs.getLong("id_transaksi"));
+
         String at = rs.getString("amount_total");
         String ap = rs.getString("amount_paid");
         String ao = rs.getString("amount_outstanding");
         r.setAmountTotal(at == null || at.trim().isEmpty() ? BigDecimal.ZERO : new BigDecimal(at));
         r.setAmountPaid(ap == null || ap.trim().isEmpty() ? BigDecimal.ZERO : new BigDecimal(ap));
         r.setAmountOutstanding(ao == null || ao.trim().isEmpty() ? BigDecimal.ZERO : new BigDecimal(ao));
+
         r.setCreatedAt(rs.getString("created_at"));
         r.setStatus(rs.getString("status"));
+
+        // voucher / owner info (nullable)
+        int vid = rs.getInt("voucher_id");
+        if (rs.wasNull()) r.setVoucherId(null); else r.setVoucherId(vid);
+        r.setVoucherCode(rs.getString("voucher_code"));
+        r.setOwnerName(rs.getString("owner_name"));
+
         return r;
     }
 }

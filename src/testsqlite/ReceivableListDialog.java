@@ -1,8 +1,3 @@
-/*
- * To change this license header, choose License Headers in Project Properties.
- * To change this template file, choose Tools | Templates
- * and open the template in the editor.
- */
 package testsqlite;
 
 import javax.swing.*;
@@ -13,6 +8,7 @@ import java.util.List;
 
 /**
  * Dialog menampilkan daftar receivable (piutang) dan action "Bayar"
+ * Menampilkan juga nama guru pemilik voucher terkait transaksi (jika ada).
  */
 public class ReceivableListDialog extends JDialog {
     private JTable tbl;
@@ -22,10 +18,12 @@ public class ReceivableListDialog extends JDialog {
     public ReceivableListDialog(Frame parent) {
         super(parent, true);
         setTitle("Daftar Piutang (Receivable)");
-        setSize(900, 450);
+        setSize(1000, 450);
         setLayout(new BorderLayout(6,6));
 
-        model = new DefaultTableModel(new Object[]{"ID","ID Transaksi","Total","Paid","Outstanding","Created At","Status"}, 0) {
+        model = new DefaultTableModel(new Object[]{
+                "ID","ID Transaksi","Total","Dibayar","Belum Dibayar","Diperbarui Pada","Status","Nama Guru"
+        }, 0) {
             @Override public boolean isCellEditable(int r,int c){ return false; }
         };
         tbl = new JTable(model);
@@ -61,7 +59,8 @@ public class ReceivableListDialog extends JDialog {
                         r.getAmountPaid()==null?"0":r.getAmountPaid().toPlainString(),
                         r.getAmountOutstanding()==null?"0":r.getAmountOutstanding().toPlainString(),
                         r.getCreatedAt(),
-                        r.getStatus()
+                        r.getStatus(),
+                        r.getOwnerName() == null ? "-" : r.getOwnerName()
                 });
             }
         } catch (Exception ex) {
