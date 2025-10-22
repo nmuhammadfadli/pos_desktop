@@ -55,66 +55,74 @@ public class PembelianDAO {
      * Insert pembelian header + details dalam satu transaksi.
      * Akan melempar SQLException bila id_pembelian sudah ada.
      */
-    public void insertPembelianWithDetails(Pembelian p) throws SQLException {
-        if (p == null) throw new IllegalArgumentException("Pembelian tidak boleh null");
-        if (p.getIdPembelian() == null || p.getIdPembelian().trim().isEmpty())
-            throw new IllegalArgumentException("idPembelian harus diisi");
-        if (p.getDetails() == null || p.getDetails().isEmpty())
-            throw new IllegalArgumentException("Tambahkan minimal 1 detail");
+   public void insertPembelianWithDetails(Pembelian p) throws SQLException {
+    if (p == null) throw new IllegalArgumentException("Pembelian tidak boleh null");
+    if (p.getIdPembelian() == null || p.getIdPembelian().trim().isEmpty())
+        throw new IllegalArgumentException("idPembelian harus diisi");
+    if (p.getDetails() == null || p.getDetails().isEmpty())
+        throw new IllegalArgumentException("Tambahkan minimal 1 detail");
 
-        String insHeader = "INSERT INTO data_pembelian (id_pembelian, tgl_pembelian, payment_method, total_harga) VALUES (?, ?, ?, ?)";
-        String insDetail = "INSERT INTO detail_pembelian (harga_beli, stok, subtotal, id_supplier, id_pembelian, id_barang) VALUES (?, ?, ?, ?, ?, ?)";
+    String insHeader = "INSERT INTO data_pembelian (id_pembelian, tgl_pembelian, payment_method, total_harga) VALUES (?, ?, ?, ?)";
+    String insDetail = "INSERT INTO detail_pembelian (harga_beli, stok, subtotal, id_supplier, id_pembelian, id_barang) VALUES (?, ?, ?, ?, ?, ?)";
 
-        try (Connection conn = DatabaseHelper.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                // cek duplikat
-                if (exists(p.getIdPembelian())) {
-                    throw new SQLException("ID pembelian '" + p.getIdPembelian() + "' sudah ada.");
+    try (Connection conn = DatabaseHelper.getConnection()) {
+        conn.setAutoCommit(false);
+        try {
+            // === cek duplikat menggunakan *koneksi yang sama* ===
+            String sel = "SELECT 1 FROM data_pembelian WHERE id_pembelian = ? LIMIT 1";
+            try (PreparedStatement psSel = conn.prepareStatement(sel)) {
+                psSel.setString(1, p.getIdPembelian());
+                try (ResultSet rs = psSel.executeQuery()) {
+                    if (rs.next()) {
+                        throw new SQLException("ID pembelian '" + p.getIdPembelian() + "' sudah ada.");
+                    }
                 }
+            }
 
-                // insert header (include payment_method)
-                try (PreparedStatement ph = conn.prepareStatement(insHeader)) {
-                    ph.setString(1, p.getIdPembelian());
-                    ph.setString(2, p.getTglPembelian());
-                    ph.setString(3, p.getPaymentMethod() == null ? "CASH" : p.getPaymentMethod());
-                    ph.setInt(4, p.getTotalHarga() == null ? 0 : p.getTotalHarga());
-                    ph.executeUpdate();
-                }
+            // insert header (include payment_method)
+            try (PreparedStatement ph = conn.prepareStatement(insHeader)) {
+                ph.setString(1, p.getIdPembelian());
+                ph.setString(2, p.getTglPembelian());
+                ph.setString(3, p.getPaymentMethod() == null ? "CASH" : p.getPaymentMethod());
+                ph.setInt(4, p.getTotalHarga() == null ? 0 : p.getTotalHarga());
+                ph.executeUpdate();
+            }
 
-                // insert detail
-                try (PreparedStatement pd = conn.prepareStatement(insDetail, Statement.RETURN_GENERATED_KEYS)) {
-                    for (DetailPembelian d : p.getDetails()) {
-                        // pastikan idPembelian di detail di-set
-                        d.setIdPembelian(p.getIdPembelian());
+            // insert detail
+            try (PreparedStatement pd = conn.prepareStatement(insDetail, Statement.RETURN_GENERATED_KEYS)) {
+                for (DetailPembelian d : p.getDetails()) {
+                    // pastikan idPembelian di detail di-set
+                    d.setIdPembelian(p.getIdPembelian());
 
-                        pd.setInt(1, d.getHargaBeli() == null ? 0 : d.getHargaBeli());
-                        pd.setInt(2, d.getStok() == null ? 0 : d.getStok());
-                        pd.setInt(3, d.getSubtotal() == null ? 0 : d.getSubtotal());
-                        if (d.getIdSupplier() == null) pd.setNull(4, Types.INTEGER);
-                        else pd.setInt(4, d.getIdSupplier());
-                        pd.setString(5, d.getIdPembelian());
-                        if (d.getIdBarang() == null) pd.setNull(6, Types.INTEGER);
-                        else pd.setInt(6, d.getIdBarang());
+                    pd.setInt(1, d.getHargaBeli() == null ? 0 : d.getHargaBeli());
+                    pd.setInt(2, d.getStok() == null ? 0 : d.getStok());
+                    pd.setInt(3, d.getSubtotal() == null ? 0 : d.getSubtotal());
+                    if (d.getIdSupplier() == null) pd.setNull(4, Types.INTEGER);
+                    else pd.setInt(4, d.getIdSupplier());
+                    pd.setString(5, d.getIdPembelian());
+                    if (d.getIdBarang() == null) pd.setNull(6, Types.INTEGER);
+                    else pd.setInt(6, d.getIdBarang());
 
-                        pd.executeUpdate();
-                        try (ResultSet gk = pd.getGeneratedKeys()) {
-                            if (gk.next()) {
-                                d.setIdDetailPembelian(gk.getInt(1));
-                            }
+                    pd.executeUpdate();
+                    try (ResultSet gk = pd.getGeneratedKeys()) {
+                        if (gk.next()) {
+                            d.setIdDetailPembelian(gk.getInt(1));
                         }
                     }
                 }
-
-                conn.commit();
-            } catch (Exception ex) {
-                try { conn.rollback(); } catch (Throwable t) {}
-                throw (ex instanceof SQLException) ? (SQLException) ex : new SQLException(ex);
-            } finally {
-                try { conn.setAutoCommit(true); } catch (Throwable ignore) {}
             }
+
+            conn.commit();
+        } catch (Exception ex) {
+            try { conn.rollback(); } catch (Throwable t) {}
+            // kalau mau, bisa deteksi unique constraint sqlite (error code 19) dan beri pesan lebih ramah
+            throw (ex instanceof SQLException) ? (SQLException) ex : new SQLException(ex);
+        } finally {
+            try { conn.setAutoCommit(true); } catch (Throwable ignore) {}
         }
     }
+}
+
 
     public List<Pembelian> findAllPembelian() throws SQLException {
         List<Pembelian> out = new ArrayList<>();

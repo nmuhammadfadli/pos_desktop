@@ -477,59 +477,116 @@ public static Voucher findVoucherById(int idVoucher) throws SQLException {
 //        return list;
 //    }
 
-    public static DetailBarang findDetailById(int idDetail) throws SQLException {
-        String sql = "SELECT id_detail_barang, barcode, stok, harga_jual, tanggal_exp, id_barang, id_detail_pembelian FROM detail_barang WHERE id_detail_barang = ?";
-        try (Connection conn = getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, idDetail);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    DetailBarang d = new DetailBarang();
-                    d.setId(rs.getInt("id_detail_barang"));
-                    d.setBarcode(rs.getString("barcode"));
-                    d.setStok(rs.getInt("stok"));
-                    String hargaStr = rs.getString("harga_jual");
-                    d.setHargaJual((hargaStr == null || hargaStr.trim().isEmpty()) ? BigDecimal.ZERO : new BigDecimal(hargaStr));
-                    d.setTanggalExp(rs.getString("tanggal_exp"));
-                    d.setIdBarang(rs.getInt("id_barang"));
-                    try {
-                        DetailBarang.class.getMethod("setIdDetailPembelian", Integer.class).invoke(d, (Integer) rs.getObject("id_detail_pembelian"));
-                    } catch (NoSuchMethodException nsme) {
-                        // ignore
-                    } catch (Exception ignore) {}
-                    return d;
-                }
-            }
-        }
-        return null;
-    }
-      public static List<DetailBarang> getAllDetailBarang() throws SQLException {
-        List<DetailBarang> list = new ArrayList<>();
-        String sql = "SELECT id_detail_barang, id_barang, id_supplier, stok, harga_jual, tanggal_exp, barcode, id_detail_pembelian FROM detail_barang ORDER BY id_detail_barang";
-        try (Connection conn = getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
-            while (rs.next()) {
+public static DetailBarang findDetailById(int idDetail) throws SQLException {
+    String sql =
+        "SELECT a.id_detail_barang, a.barcode, a.stok, a.harga_jual, a.tanggal_exp, " +
+        "a.id_barang, b.nama AS nama_barang, a.id_supplier, c.nama_supplier, a.id_detail_pembelian " +
+        "FROM detail_barang a " +
+        "LEFT JOIN barang b ON a.id_barang = b.id " +
+        "LEFT JOIN data_supplier c ON a.id_supplier = c.id_supplier " +
+        "WHERE a.id_detail_barang = ?";
+    try (Connection conn = getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql)) {
+        ps.setInt(1, idDetail);
+        try (ResultSet rs = ps.executeQuery()) {
+            if (rs.next()) {
                 DetailBarang d = new DetailBarang();
                 d.setId(rs.getInt("id_detail_barang"));
-                d.setIdBarang(rs.getInt("id_barang"));
-                int idSup = rs.getInt("id_supplier");
-                if (rs.wasNull()) d.setIdSupplier(null); else d.setIdSupplier(idSup);
+                d.setBarcode(rs.getString("barcode"));
                 d.setStok(rs.getInt("stok"));
+
                 String hargaStr = rs.getString("harga_jual");
                 d.setHargaJual((hargaStr == null || hargaStr.trim().isEmpty()) ? BigDecimal.ZERO : new BigDecimal(hargaStr));
+
                 d.setTanggalExp(rs.getString("tanggal_exp"));
-                d.setBarcode(rs.getString("barcode"));
+
+                // id_barang + nama_barang
+                int idBarang = rs.getInt("id_barang");
+                if (rs.wasNull()) {
+                    d.setIdBarang(0); // atau sesuaikan jika model memakai Integer
+                } else {
+                    d.setIdBarang(idBarang);
+                }
+                d.setNamaBarang(rs.getString("nama_barang")); // bisa null
+
+                // id_supplier + nama_supplier (nullable)
+                int idSup = rs.getInt("id_supplier");
+                if (rs.wasNull()) d.setIdSupplier(null);
+                else d.setIdSupplier(idSup);
+                d.setNamaSupplier(rs.getString("nama_supplier")); // bisa null
+
+                // id_detail_pembelian (nullable) - gunakan getObject agar null tetap null
+                Object idDetObj = rs.getObject("id_detail_pembelian");
                 try {
-                    DetailBarang.class.getMethod("setIdDetailPembelian", Integer.class).invoke(d, (Integer) rs.getObject("id_detail_pembelian"));
+                    // jika model punya setter dengan Integer
+                    DetailBarang.class.getMethod("setIdDetailPembelian", Integer.class).invoke(d, (Integer) idDetObj);
                 } catch (NoSuchMethodException nsme) {
-                    // ignore if model not extended
+                    // jika tidak ada setter dengan Integer, coba setter dengan int (primitive)
+//                    try {
+//                        if (idDetObj != null) {
+//                            DetailBarang.class.getMethod("setIdDetailPembelian", int.class).invoke(d, ((Number) idDetObj).intValue());
+//                        }
+//                    } catch (NoSuchMethodException | Exception) {}
                 } catch (Exception ignore) {}
-                list.add(d);
+
+                return d;
             }
         }
-        return list;
     }
+    return null;
+}
+
+public static List<DetailBarang> getAllDetailBarang() throws SQLException {
+    List<DetailBarang> list = new ArrayList<>();
+    String sql =
+        "SELECT a.id_detail_barang, a.barcode, a.stok, a.harga_jual, a.tanggal_exp, " +
+        "a.id_barang, b.nama AS nama_barang, a.id_supplier, c.nama_supplier, a.id_detail_pembelian " +
+        "FROM detail_barang a " +
+        "LEFT JOIN barang b ON a.id_barang = b.id " +
+        "LEFT JOIN data_supplier c ON a.id_supplier = c.id_supplier " +
+        "ORDER BY a.id_detail_barang";
+    try (Connection conn = getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql);
+         ResultSet rs = ps.executeQuery()) {
+        while (rs.next()) {
+            DetailBarang d = new DetailBarang();
+            d.setId(rs.getInt("id_detail_barang"));
+            d.setBarcode(rs.getString("barcode"));
+            d.setStok(rs.getInt("stok"));
+
+            String hargaStr = rs.getString("harga_jual");
+            d.setHargaJual((hargaStr == null || hargaStr.trim().isEmpty()) ? BigDecimal.ZERO : new BigDecimal(hargaStr));
+
+            d.setTanggalExp(rs.getString("tanggal_exp"));
+
+            // id_barang + nama_barang
+            int idBarang = rs.getInt("id_barang");
+            if (rs.wasNull()) d.setIdBarang(0); else d.setIdBarang(idBarang);
+            d.setNamaBarang(rs.getString("nama_barang"));
+
+            // id_supplier + nama_supplier
+            int idSup = rs.getInt("id_supplier");
+            if (rs.wasNull()) d.setIdSupplier(null); else d.setIdSupplier(idSup);
+            d.setNamaSupplier(rs.getString("nama_supplier"));
+
+            // id_detail_pembelian nullable
+            Object idDetObj = rs.getObject("id_detail_pembelian");
+            try {
+                DetailBarang.class.getMethod("setIdDetailPembelian", Integer.class).invoke(d, (Integer) idDetObj);
+            } catch (NoSuchMethodException nsme) {
+//                try {
+//                    if (idDetObj != null) {
+//                        DetailBarang.class.getMethod("setIdDetailPembelian", int.class).invoke(d, ((Number) idDetObj).intValue());
+//                    }
+//                } catch (NoSuchMethodException | Exception ignore) {}
+            } catch (Exception ignore) {}
+
+            list.add(d);
+        }
+    }
+    return list;
+}
+
 
     public static int insertDetailBarang(DetailBarang d) throws SQLException {
         String sql = "INSERT INTO detail_barang (barcode, stok, harga_jual, tanggal_exp, id_barang, id_detail_pembelian) VALUES (?, ?, ?, ?, ?, ?)";
@@ -539,7 +596,7 @@ public static Voucher findVoucherById(int idVoucher) throws SQLException {
             ps.setInt(2, d.getStok());
             ps.setString(3, d.getHargaJual() == null ? BigDecimal.ZERO.toPlainString() : d.getHargaJual().toPlainString());
             ps.setString(4, d.getTanggalExp());
-            ps.setInt(5, d.getIdBarang());
+            ps.setString(5, d.getNamaBarang());
             // set id_detail_pembelian if model exposes it, else null
             try {
                 Integer idDet = (Integer) DetailBarang.class.getMethod("getIdDetailPembelian").invoke(d);
@@ -565,7 +622,7 @@ public static Voucher findVoucherById(int idVoucher) throws SQLException {
             ps.setInt(2, d.getStok());
             ps.setString(3, d.getHargaJual() == null ? BigDecimal.ZERO.toPlainString() : d.getHargaJual().toPlainString());
             ps.setString(4, d.getTanggalExp());
-            ps.setInt(5, d.getIdBarang());
+            ps.setString(5, d.getNamaBarang());
             try {
                 Integer idDet = (Integer) DetailBarang.class.getMethod("getIdDetailPembelian").invoke(d);
                 if (idDet == null) ps.setNull(6, Types.INTEGER); else ps.setInt(6, idDet);

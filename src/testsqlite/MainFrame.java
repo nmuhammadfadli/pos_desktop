@@ -352,8 +352,8 @@ public class MainFrame extends JFrame {
                        d.getStok(),
                        harga,
                        d.getTanggalExp(),
-                       d.getIdBarang(),
-                       d.getIdSupplier() == null ? "-" : d.getIdSupplier(),
+                       d.getNamaBarang(),
+                       d.getNamaSupplier()== null ? "-" : d.getNamaSupplier(),
                        d.getIdDetailPembelian() == null ? "-" : d.getIdDetailPembelian()
                });
            }

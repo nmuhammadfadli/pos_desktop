@@ -3,6 +3,7 @@ package testsqlite;
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
+import java.sql.SQLException;
 import java.util.ArrayList;
 
 /**
@@ -185,11 +186,17 @@ public class AddEditPembelianDialog extends JDialog {
         }
     }
 
-    private void onSave() {
+private void onSave() {
+    JButton defaultSaveBtn = (JButton) getRootPane().getDefaultButton(); // get the default Save button
+    if (defaultSaveBtn != null) defaultSaveBtn.setEnabled(false); // disable to avoid double submit
+
+    try {
         String id = txtIdPembelian.getText().trim();
         String tgl = txtTglPembelian.getText().trim();
         if (tgl.isEmpty()) { JOptionPane.showMessageDialog(this, "Tanggal harus diisi"); return; }
-        if (pembelian.getDetails() == null || pembelian.getDetails().isEmpty()) { JOptionPane.showMessageDialog(this, "Tambahkan minimal 1 detail"); return; }
+        if (pembelian.getDetails() == null || pembelian.getDetails().isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Tambahkan minimal 1 detail"); return;
+        }
 
         // validate date
         try { java.time.LocalDate.parse(tgl); } catch (Exception ex) {
@@ -197,35 +204,15 @@ public class AddEditPembelianDialog extends JDialog {
             return;
         }
 
-        // jika id kosong -> generate otomatis
+        // if id empty -> generate
         if (id.isEmpty()) {
             id = generatePembelianId();
             txtIdPembelian.setText(id);
         }
 
-        // cek duplikat
-        try {
-            PembelianDAO dao = new PembelianDAO();
-            if (dao.exists(id)) {
-                int opt = JOptionPane.showConfirmDialog(this,
-                        "ID pembelian '" + id + "' sudah ada. Buat ID baru otomatis?", "ID sudah ada",
-                        JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-                if (opt == JOptionPane.YES_OPTION) {
-                    id = generatePembelianId();
-                    txtIdPembelian.setText(id);
-                } else {
-                    return; // batalkan simpan
-                }
-            }
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(this, "Gagal cek ID: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-            return;
-        }
-
+        // set fields to model
         pembelian.setIdPembelian(id);
         pembelian.setTglPembelian(tgl);
-
-        // set payment method (NEW)
         String selMethod = (String) cbPaymentMethod.getSelectedItem();
         pembelian.setPaymentMethod(selMethod == null ? "CASH" : selMethod);
 
@@ -235,7 +222,7 @@ public class AddEditPembelianDialog extends JDialog {
             Integer harga = d.getHargaBeli() == null ? 0 : d.getHargaBeli();
             Integer stok = d.getStok() == null ? 0 : d.getStok();
             Integer subtotal = d.getSubtotal() == null ? 0 : d.getSubtotal();
-            if (subtotal == 0) {
+            if (subtotal == 0 && harga > 0 && stok > 0) {
                 long calc = (long) harga * (long) stok;
                 subtotal = (int) Math.min(calc, Integer.MAX_VALUE);
                 d.setSubtotal(subtotal);
@@ -245,15 +232,49 @@ public class AddEditPembelianDialog extends JDialog {
         }
         pembelian.setTotalHarga((int) totalLong);
 
-
-        try {
-            new PembelianDAO().insertPembelianWithDetails(pembelian);
-            saved = true;
-            setVisible(false);
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(this, "Gagal menyimpan pembelian: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+        // Try insert — DON'T pre-check exists() from UI (let DB enforce uniqueness)
+        PembelianDAO dao = new PembelianDAO();
+        boolean inserted = false;
+        int attempt = 0;
+        while (!inserted && attempt < 2) {
+            attempt++;
+            try {
+                dao.insertPembelianWithDetails(pembelian);
+                inserted = true;
+            } catch (SQLException sqe) {
+                String msg = sqe.getMessage() == null ? "" : sqe.getMessage().toLowerCase();
+                if (msg.contains("unique") || msg.contains("constraint") || (sqe.getErrorCode() == 19)) {
+                    int opt = JOptionPane.showConfirmDialog(this,
+                            "ID pembelian '" + pembelian.getIdPembelian() + "' sudah ada. Buat ID baru otomatis dan coba lagi?",
+                            "ID sudah ada",
+                            JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+                    if (opt == JOptionPane.YES_OPTION && attempt == 1) {
+                        String newId = generatePembelianId();
+                        pembelian.setIdPembelian(newId);
+                        txtIdPembelian.setText(newId);
+                        // loop will retry
+                        continue;
+                    } else {
+                        // user chose not to retry / second attempt failed => rethrow to show error
+                        throw sqe;
+                    }
+                } else {
+                    // non-unique SQL error -> rethrow
+                    throw sqe;
+                }
+            }
         }
+
+        // if reached here and inserted true:
+        saved = true;
+        setVisible(false);
+    } catch (Exception ex) {
+        JOptionPane.showMessageDialog(this, "Gagal menyimpan pembelian: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+    } finally {
+        if (defaultSaveBtn != null) defaultSaveBtn.setEnabled(true); // re-enable
     }
+}
+
 
     private String generatePembelianId() {
         String ts = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));

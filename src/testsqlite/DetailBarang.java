@@ -12,14 +12,17 @@ public class DetailBarang {
     private BigDecimal hargaJual;
     private String tanggalExp;
     private int idBarang;
+    private String namaBarang;
 
-    /** supplier untuk batch ini — bisa null */
     private Integer idSupplier;
-
-    /** bila batch ini dibuat langsung dari detail_pembelian (opsional), simpan id-nya */
     private Integer idDetailPembelian;
+    
+    private String namaSupplier;
+
+
 
     public DetailBarang() {}
+    
 
     // getters / setters
     public int getId() { return id; }
@@ -27,6 +30,13 @@ public class DetailBarang {
 
     public String getBarcode() { return barcode; }
     public void setBarcode(String barcode) { this.barcode = barcode; }
+    
+    public String getNamaBarang() { return namaBarang; }
+public void setNamaBarang(String namaBarang) { this.namaBarang = namaBarang; }
+
+public String getNamaSupplier() { return namaSupplier; }
+public void setNamaSupplier(String namaSupplier) { this.namaSupplier = namaSupplier; }
+
 
     public int getStok() { return stok; }
     public void setStok(int stok) { this.stok = stok; }
@@ -42,6 +52,8 @@ public class DetailBarang {
 
     public Integer getIdSupplier() { return idSupplier; }
     public void setIdSupplier(Integer idSupplier) { this.idSupplier = idSupplier; }
+    
+
 
     public Integer getIdDetailPembelian() { return idDetailPembelian; }
     public void setIdDetailPembelian(Integer idDetailPembelian) { this.idDetailPembelian = idDetailPembelian; }

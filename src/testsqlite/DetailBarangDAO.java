@@ -8,12 +8,19 @@ import java.util.List;
 /**
  * DAO untuk detail_barang (batches).
  * Menangani kolom: id_detail_barang, id_barang, id_supplier (nullable), stok, harga_jual, tanggal_exp, barcode, id_detail_pembelian (nullable)
+ * Juga mengambil nama barang (b.nama AS nama_barang) dan nama supplier (c.nama_supplier AS nama_supplier)
  */
 public class DetailBarangDAO {
 
     public List<DetailBarang> findAll() throws SQLException {
         List<DetailBarang> list = new ArrayList<>();
-        String sql = "SELECT id_detail_barang, barcode, stok, harga_jual, tanggal_exp, id_barang, id_supplier, id_detail_pembelian FROM detail_barang ORDER BY id_detail_barang";
+        String sql =
+            "SELECT a.id_detail_barang, a.barcode, a.stok, a.harga_jual, a.tanggal_exp, " +
+            "a.id_barang, b.nama AS nama_barang, a.id_supplier, c.nama_supplier, a.id_detail_pembelian " +
+            "FROM detail_barang a " +
+            "LEFT JOIN barang b ON a.id_barang = b.id " +
+            "LEFT JOIN data_supplier c ON a.id_supplier = c.id_supplier " +
+            "ORDER BY a.id_detail_barang";
         try (Connection conn = DatabaseHelper.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
@@ -26,7 +33,13 @@ public class DetailBarangDAO {
     }
 
     public DetailBarang findById(int idDetail) throws SQLException {
-        String sql = "SELECT id_detail_barang, barcode, stok, harga_jual, tanggal_exp, id_barang, id_supplier, id_detail_pembelian FROM detail_barang WHERE id_detail_barang = ?";
+        String sql =
+            "SELECT a.id_detail_barang, a.barcode, a.stok, a.harga_jual, a.tanggal_exp, " +
+            "a.id_barang, b.nama AS nama_barang, a.id_supplier, c.nama_supplier, a.id_detail_pembelian " +
+            "FROM detail_barang a " +
+            "LEFT JOIN barang b ON a.id_barang = b.id " +
+            "LEFT JOIN data_supplier c ON a.id_supplier = c.id_supplier " +
+            "WHERE a.id_detail_barang = ?";
         try (Connection conn = DatabaseHelper.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, idDetail);
@@ -42,7 +55,14 @@ public class DetailBarangDAO {
      */
     public List<DetailBarang> findByBarangId(int idBarang) throws SQLException {
         List<DetailBarang> list = new ArrayList<>();
-        String sql = "SELECT id_detail_barang, barcode, stok, harga_jual, tanggal_exp, id_barang, id_supplier, id_detail_pembelian FROM detail_barang WHERE id_barang = ? ORDER BY id_detail_barang";
+        String sql =
+            "SELECT a.id_detail_barang, a.barcode, a.stok, a.harga_jual, a.tanggal_exp, " +
+            "a.id_barang, b.nama AS nama_barang, a.id_supplier, c.nama_supplier, a.id_detail_pembelian " +
+            "FROM detail_barang a " +
+            "LEFT JOIN barang b ON a.id_barang = b.id " +
+            "LEFT JOIN data_supplier c ON a.id_supplier = c.id_supplier " +
+            "WHERE a.id_barang = ? " +
+            "ORDER BY a.id_detail_barang";
         try (Connection conn = DatabaseHelper.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, idBarang);
@@ -154,7 +174,7 @@ public class DetailBarangDAO {
      * Mengembalikan null jika tidak ada.
      */
     public DetailBarang getFirstAvailableDetail() throws SQLException {
-        String sql = "SELECT id_detail_barang, barcode, stok, harga_jual, tanggal_exp, id_barang, id_supplier, id_detail_pembelian FROM detail_barang WHERE stok > 0 LIMIT 1";
+        String sql = "SELECT a.id_detail_barang, a.barcode, a.stok, a.harga_jual, a.tanggal_exp, a.id_barang, b.nama AS nama_barang, a.id_supplier, c.nama_supplier, a.id_detail_pembelian FROM detail_barang a LEFT JOIN barang b ON a.id_barang = b.id LEFT JOIN data_supplier c ON a.id_supplier = c.id_supplier WHERE a.stok > 0 LIMIT 1";
         try (Connection conn = DatabaseHelper.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
@@ -183,6 +203,21 @@ public class DetailBarangDAO {
         int idDet = rs.getInt("id_detail_pembelian");
         if (rs.wasNull()) d.setIdDetailPembelian(null);
         else d.setIdDetailPembelian(idDet);
+
+        // nama barang & supplier (bisa null)
+        try {
+            String namaBarang = rs.getString("nama_barang");
+            d.setNamaBarang(namaBarang == null ? null : namaBarang);
+        } catch (SQLException ignore) {
+            // kolom tidak ada — aman untuk backward compatibility
+        }
+
+        try {
+            String namaSupplier = rs.getString("nama_supplier");
+            d.setNamaSupplier(namaSupplier == null ? null : namaSupplier);
+        } catch (SQLException ignore) {
+            // kolom tidak ada
+        }
 
         return d;
     }
