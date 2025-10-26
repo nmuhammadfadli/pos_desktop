@@ -120,6 +120,7 @@ public class AddEditPembelianDialog extends JDialog {
             pembelian.setDetails(new ArrayList<DetailPembelian>());
         }
         refreshDetailTable();
+        txtIdPembelian.setText(generatePembelianId());
     }
 
     private void onAddDetail() {
@@ -232,39 +233,6 @@ private void onSave() {
         }
         pembelian.setTotalHarga((int) totalLong);
 
-        // Try insert — DON'T pre-check exists() from UI (let DB enforce uniqueness)
-        PembelianDAO dao = new PembelianDAO();
-        boolean inserted = false;
-        int attempt = 0;
-        while (!inserted && attempt < 2) {
-            attempt++;
-            try {
-                dao.insertPembelianWithDetails(pembelian);
-                inserted = true;
-            } catch (SQLException sqe) {
-                String msg = sqe.getMessage() == null ? "" : sqe.getMessage().toLowerCase();
-                if (msg.contains("unique") || msg.contains("constraint") || (sqe.getErrorCode() == 19)) {
-                    int opt = JOptionPane.showConfirmDialog(this,
-                            "ID pembelian '" + pembelian.getIdPembelian() + "' sudah ada. Buat ID baru otomatis dan coba lagi?",
-                            "ID sudah ada",
-                            JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-                    if (opt == JOptionPane.YES_OPTION && attempt == 1) {
-                        String newId = generatePembelianId();
-                        pembelian.setIdPembelian(newId);
-                        txtIdPembelian.setText(newId);
-                        // loop will retry
-                        continue;
-                    } else {
-                        // user chose not to retry / second attempt failed => rethrow to show error
-                        throw sqe;
-                    }
-                } else {
-                    // non-unique SQL error -> rethrow
-                    throw sqe;
-                }
-            }
-        }
-
         // if reached here and inserted true:
         saved = true;
         setVisible(false);
@@ -276,11 +244,33 @@ private void onSave() {
 }
 
 
-    private String generatePembelianId() {
-        String ts = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
-        int rnd = (int) (Math.random() * 900) + 100;
-        return "PB-" + ts + "-" + rnd;
+private String generatePembelianId() {
+    String today = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("ddMMyyyy"));
+    int nextNumber = 1;
+
+    // ambil ID terakhir dari tabel pembelian yang sesuai tanggal hari ini
+    try (java.sql.Connection conn = DatabaseHelper.getConnection();
+         java.sql.PreparedStatement ps = conn.prepareStatement(
+                 "SELECT id_pembelian FROM data_pembelian WHERE id_pembelian LIKE ? ORDER BY id_pembelian DESC LIMIT 1")) {
+        ps.setString(1, today + "%");
+        try (java.sql.ResultSet rs = ps.executeQuery()) {
+            if (rs.next()) {
+                String lastId = rs.getString(1); // contoh: 221020250005
+                String seqStr = lastId.substring(8); // ambil 0005
+                try {
+                    nextNumber = Integer.parseInt(seqStr) + 1;
+                } catch (NumberFormatException ignored) {}
+            }
+        }
+    } catch (Exception e) {
+        System.err.println("Gagal cek ID terakhir: " + e.getMessage());
     }
+
+    // format ke 4 digit (misal 0001)
+    String newSeq = String.format("%04d", nextNumber);
+    return today + newSeq;
+}
+
 
     private void onCancel() {
         saved = false;

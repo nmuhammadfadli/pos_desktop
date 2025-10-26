@@ -147,24 +147,14 @@ public class DatabaseHelper {
             try { stmt.execute("CREATE INDEX IF NOT EXISTS idx_detail_pembelian_id_supplier ON detail_pembelian(id_supplier)"); } catch (Throwable t) {}
 
             // trigger: merge-on-insert behavior
-            try {
-                stmt.execute(
-                    "CREATE TRIGGER IF NOT EXISTS trg_after_insert_detail_pembelian_merge " +
-                    "AFTER INSERT ON detail_pembelian " +
-                    "FOR EACH ROW " +
-                    "BEGIN " +
-                    "  -- try to add to existing matching batch (same barang, supplier, harga)\n" +
-                    "  UPDATE detail_barang SET stok = stok + NEW.stok " +
-                    "    WHERE id_barang = NEW.id_barang AND id_supplier = NEW.id_supplier AND harga_jual = CAST(NEW.harga_beli AS TEXT);\n" +
-                    "  -- if no batch existed, create a new batch and store id_detail_pembelian there\n" +
-                    "  INSERT INTO detail_barang (id_barang, id_supplier, stok, harga_jual, tanggal_exp, barcode, id_detail_pembelian) " +
-                    "    SELECT NEW.id_barang, NEW.id_supplier, NEW.stok, CAST(NEW.harga_beli AS TEXT), NULL, NULL, NEW.id_detail_pembelian " +
-                    "    WHERE NOT EXISTS (SELECT 1 FROM detail_barang WHERE id_barang = NEW.id_barang AND id_supplier = NEW.id_supplier AND harga_jual = CAST(NEW.harga_beli AS TEXT));\n" +
-                    "END;"
-                );
-            } catch (Throwable t) {
-                System.err.println("warning creating trg_after_insert_detail_pembelian_merge: " + t.getMessage());
-            }
+try {
+    stmt.execute(
+        "DROP TRIGGER IF EXISTS trg_after_insert_detail_pembelian_merge; "
+    );
+} catch (Throwable t) {
+    System.err.println("warning creating trg_after_insert_detail_pembelian_merge: " + t.getMessage());
+}
+
 
             // trigger: when a purchase detail is deleted, remove batch rows that were created pointing to it
             // (only affects batches that saved id_detail_pembelian; merged batches without that id remain untouched)
