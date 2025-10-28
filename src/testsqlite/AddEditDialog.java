@@ -1,5 +1,6 @@
 package testsqlite;
 
+import Barang.Barang;
 import java.math.BigDecimal;
 import javax.swing.*;
 

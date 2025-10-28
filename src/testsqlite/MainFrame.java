@@ -1,15 +1,60 @@
 package testsqlite;
 
+import Barang.AddEditBarangDialog;
+import Barang.AddEditDetailDialog;
+import Barang.Barang;
+import Barang.BarangDAO;
+import Barang.DetailBarang;
+import Barang.DetailBarangDAO;
+import Guru.AddEditGuruDialog;
+import Guru.Guru;
+import Guru.GuruDAO;
+import Hutang.ReceivableListDialog;
+import Kategori.AddEditKategoriDialog;
+import Kategori.Kategori;
+import Kategori.KategoriDAO;
+import Pembelian.AddEditPembelianDialog;
+import Pembelian.DetailPembelian;
+import Pembelian.Pembelian;
+import Pembelian.PembelianDAO;
+import Pengguna.AddEditPenggunaDialog;
+import Pengguna.Pengguna;
+import Pengguna.PenggunaDAO;
+import Supplier.AddEditSupplierDialog;
+import Supplier.Supplier;
+import Supplier.SupplierDAO;
+import Voucher.AddEditVoucherDialog;
+import Voucher.Voucher;
+import Voucher.VoucherDAO;
+import penjualan.TransactionDialog;
+import penjualan.TransactionListDialog;
+
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.math.BigDecimal;
+import java.sql.Connection;
 import java.util.List;
 
 /**
  * MainFrame - UI utama: tabs untuk Barang, Kategori, Guru, Supplier, Detail Barang, Pembelian, Voucher, Transaksi, Piutang.
+ * Revisi: menambahkan login/label kasir dan meneruskan currentUserId/currentUserName ke TransactionDialog.
  */
 public class MainFrame extends JFrame {
+
+    // UI / session fields
+    private JTabbedPane tabs;
+    private Pengguna loggedUser;
+    private String currentUserId = null;    // data_pengguna.id_pengguna (TEXT)
+    private String currentUserName = null;  // nama tampil
+
+    private JLabel lblLoggedUser = new JLabel("Belum login");
+    private JButton btnLogin = new JButton("Login");
+    private JButton btnLogout = new JButton("Logout");
+
+    // Transaksi button sekarang field supaya dapat di-enable/disable dari login flow
+    private JButton bTrans;
+
     // Barang
     private JTable tblBarang;
     private DefaultTableModel barangModel;
@@ -24,6 +69,11 @@ public class MainFrame extends JFrame {
     private JTable tblGuru;
     private DefaultTableModel guruModel;
     private GuruDAO guruDAO;
+
+    // Pengguna
+    private JTable tblPengguna;
+    private DefaultTableModel penggunaModel;
+    private PenggunaDAO penggunaDAO;
 
     // Supplier
     private JTable tblSupplier;
@@ -50,35 +100,14 @@ public class MainFrame extends JFrame {
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
         // init DAOs (tangani kemungkinan exception)
-        try {
-            kategoriDAO = new KategoriDAO();
-        } catch (Exception ex) {
-            kategoriDAO = null;
-            System.err.println("KategoriDAO init failed: " + ex.getMessage());
-        }
-
-        try {
-            guruDAO = new GuruDAO();
-        } catch (Exception ex) {
-            guruDAO = null;
-            System.err.println("GuruDAO init failed: " + ex.getMessage());
-        }
-
-        try {
-            supplierDAO = new SupplierDAO();
-        } catch (Exception ex) {
-            supplierDAO = null;
-            System.err.println("SupplierDAO init failed: " + ex.getMessage());
-        }
-
-        try {
-            pembelianDAO = new PembelianDAO();
-        } catch (Exception ex) {
-            pembelianDAO = null;
-            System.err.println("PembelianDAO init failed: " + ex.getMessage());
-        }
+        try { kategoriDAO = new KategoriDAO(); } catch (Exception ex) { kategoriDAO = null; System.err.println("KategoriDAO init failed: " + ex.getMessage()); }
+        try { guruDAO = new GuruDAO(); } catch (Exception ex) { guruDAO = null; System.err.println("GuruDAO init failed: " + ex.getMessage()); }
+        try { penggunaDAO = new PenggunaDAO(); } catch (Exception ex) { penggunaDAO = null; System.err.println("PenggunaDAO init failed: " + ex.getMessage()); }
+        try { supplierDAO = new SupplierDAO(); } catch (Exception ex) { supplierDAO = null; System.err.println("SupplierDAO init failed: " + ex.getMessage()); }
+        try { pembelianDAO = new PembelianDAO(); } catch (Exception ex) { pembelianDAO = null; System.err.println("PembelianDAO init failed: " + ex.getMessage()); }
 
         init();
+        // initial loads (safe even if DAOs null)
         loadBarang();
         loadVouchers();
         loadDetailBarang();
@@ -86,11 +115,51 @@ public class MainFrame extends JFrame {
         loadGuru();
         loadSupplier();
         loadPembelian();
+        loadPengguna();
+
         setLocationRelativeTo(null);
     }
 
+    public MainFrame(Pengguna user) {
+        // call default constructor to build UI & load data
+        this();
+        // set logged user if provided
+        if (user != null) {
+            setLoggedUser(user);
+        }
+    }
+
     private void init() {
-        JTabbedPane tabs = new JTabbedPane();
+        // Top bar with login status and login/logout buttons
+        JPanel topBar = new JPanel(new BorderLayout());
+        JPanel rightTop = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        btnLogin.addActionListener(e -> showLoginDialog());
+        btnLogout.addActionListener(e -> doLogout());
+        btnLogout.setEnabled(false);
+        rightTop.add(lblLoggedUser);
+        rightTop.add(btnLogin);
+        rightTop.add(btnLogout);
+        topBar.add(rightTop, BorderLayout.NORTH);
+        add(topBar, BorderLayout.NORTH);
+
+        tabs = new JTabbedPane();
+
+        // ---------------- Panel Pengguna ----------------
+        JPanel pPengguna = new JPanel(new BorderLayout());
+        penggunaModel = new DefaultTableModel(new Object[]{"ID Pengguna","Username","Nama","Jabatan","Hak Akses","Email","No Telp"}, 0) {
+            @Override public boolean isCellEditable(int r,int c){ return false; }
+        };
+        tblPengguna = new JTable(penggunaModel);
+        pPengguna.add(new JScrollPane(tblPengguna), BorderLayout.CENTER);
+
+        JPanel puBtns = new JPanel();
+        JButton puAdd = new JButton("Tambah Pengguna"); puAdd.addActionListener(e -> onTambahPengguna());
+        JButton puEdit = new JButton("Edit Pengguna"); puEdit.addActionListener(e -> onEditPengguna());
+        JButton puDel = new JButton("Hapus Pengguna"); puDel.addActionListener(e -> onHapusPengguna());
+        JButton puRef = new JButton("Refresh"); puRef.addActionListener(e -> loadPengguna());
+        puBtns.add(puAdd); puBtns.add(puEdit); puBtns.add(puDel); puBtns.add(puRef);
+        pPengguna.add(puBtns, BorderLayout.SOUTH);
+        tabs.addTab("Pengguna", pPengguna);
 
         // ---------------- Panel Barang ----------------
         JPanel pBarang = new JPanel(new BorderLayout());
@@ -161,12 +230,11 @@ public class MainFrame extends JFrame {
         tabs.addTab("Supplier", pSupplier);
 
         // ---------------- Panel Detail Barang ----------------
-         JPanel pDetail = new JPanel(new BorderLayout());
-        // sesuaikan kolom dengan model DetailBarang (menambahkan Id Supplier dan Id Detail Pembelian)
+        JPanel pDetail = new JPanel(new BorderLayout());
         detailModel = new DefaultTableModel(
-               new Object[]{"ID", "Barcode", "Stok", "Harga Jual", "Tanggal Exp", "Id Barang", "Id Supplier", "Id Detail Pembelian"}, 0) {
-           @Override public boolean isCellEditable(int r, int c) { return false; }
-       };
+                new Object[]{"ID", "Barcode", "Stok", "Harga Jual", "Tanggal Exp", "Id Barang", "Id Supplier", "Id Detail Pembelian"}, 0) {
+            @Override public boolean isCellEditable(int r, int c) { return false; }
+        };
 
         tblDetail = new JTable(detailModel);
         pDetail.add(new JScrollPane(tblDetail), BorderLayout.CENTER);
@@ -197,39 +265,39 @@ public class MainFrame extends JFrame {
         tabs.addTab("Pembelian", pPembelian);
 
         // ---------------- Panel Voucher ----------------
-      JPanel pVoucher = new JPanel(new BorderLayout());
-    // tambahkan kolom Id Guru dan Nama Guru
-   // di init(), Panel Voucher
-    voucherModel = new DefaultTableModel(new Object[]{"ID","Kode","Bulan","Nama Guru","Saldo"}, 0) {
-        @Override public boolean isCellEditable(int r,int c){ return false; }
-    };
+        JPanel pVoucher = new JPanel(new BorderLayout());
+        voucherModel = new DefaultTableModel(new Object[]{"ID","Kode","Bulan","Nama Guru","Saldo"}, 0) {
+            @Override public boolean isCellEditable(int r,int c){ return false; }
+        };
+        tblVoucher = new JTable(voucherModel);
+        // atur lebar kolom agar Nama Guru terlihat rapi (opsional)
+        try {
+            tblVoucher.getColumnModel().getColumn(0).setPreferredWidth(50);
+            tblVoucher.getColumnModel().getColumn(1).setPreferredWidth(120);
+            tblVoucher.getColumnModel().getColumn(2).setPreferredWidth(200);
+            tblVoucher.getColumnModel().getColumn(3).setPreferredWidth(100);
+            tblVoucher.getColumnModel().getColumn(4).setPreferredWidth(100);
+        } catch (Throwable ignore) {}
+        pVoucher.add(new JScrollPane(tblVoucher), BorderLayout.CENTER);
 
-    tblVoucher = new JTable(voucherModel);
-
-    // opsional: atur lebar kolom agar Nama Guru terlihat rapi
-    tblVoucher.getColumnModel().getColumn(0).setPreferredWidth(50);   
-    tblVoucher.getColumnModel().getColumn(1).setPreferredWidth(120);    
-    tblVoucher.getColumnModel().getColumn(2).setPreferredWidth(200); 
-    tblVoucher.getColumnModel().getColumn(3).setPreferredWidth(100);
-    tblVoucher.getColumnModel().getColumn(4).setPreferredWidth(100);  
-
-    pVoucher.add(new JScrollPane(tblVoucher), BorderLayout.CENTER);
-
-    JPanel vb = new JPanel();
-    JButton addV = new JButton("Tambah Voucher"); addV.addActionListener(ev -> onTambahVoucher());
-    JButton editV = new JButton("Edit Voucher"); editV.addActionListener(ev -> onEditVoucher());
-    JButton delV = new JButton("Hapus Voucher"); delV.addActionListener(ev -> onHapusVoucher());
-    JButton refV = new JButton("Refresh"); refV.addActionListener(ev -> loadVouchers());
-    vb.add(addV); vb.add(editV); vb.add(delV); vb.add(refV);
-    pVoucher.add(vb, BorderLayout.SOUTH);
-    tabs.addTab("Voucher", pVoucher);
+        JPanel vb = new JPanel();
+        JButton addV = new JButton("Tambah Voucher"); addV.addActionListener(ev -> onTambahVoucher());
+        JButton editV = new JButton("Edit Voucher"); editV.addActionListener(ev -> onEditVoucher());
+        JButton delV = new JButton("Hapus Voucher"); delV.addActionListener(ev -> onHapusVoucher());
+        JButton refV = new JButton("Refresh"); refV.addActionListener(ev -> loadVouchers());
+        vb.add(addV); vb.add(editV); vb.add(delV); vb.add(refV);
+        pVoucher.add(vb, BorderLayout.SOUTH);
+        tabs.addTab("Voucher", pVoucher);
 
         // ---------------- Panel Transaksi ----------------
         JPanel pTrans = new JPanel(new FlowLayout());
-        JButton bTrans = new JButton("Buat Transaksi (demo)");
+        bTrans = new JButton("Buat Transaksi (demo)");
+        // disabled until login
+        bTrans.setEnabled(false);
         bTrans.addActionListener(e -> {
-            TransactionDialog dlg = new TransactionDialog(this);
+            TransactionDialog dlg = new TransactionDialog(this, currentUserId, currentUserName);
             dlg.setVisible(true);
+            // refresh relevant lists after dialog
             loadBarang();
             loadVouchers();
             loadDetailBarang();
@@ -267,7 +335,76 @@ public class MainFrame extends JFrame {
         pPiutang.add(piuCenter, BorderLayout.CENTER);
         tabs.addTab("Piutang", pPiutang);
 
-        add(tabs);
+        add(tabs, BorderLayout.CENTER);
+    }
+
+    // ----------------- Session / Login helpers -----------------
+    private void showLoginDialog() {
+        LoginDialog dlg = new LoginDialog(this);
+        dlg.setVisible(true); // modal
+        if (dlg.isSucceeded()) {
+            Pengguna p = dlg.getLoggedUser();
+            if (p != null) {
+                setLoggedUser(p);
+                JOptionPane.showMessageDialog(this, "Login berhasil. Selamat datang, " + currentUserName + "!");
+            } else {
+                JOptionPane.showMessageDialog(this, "Login berhasil, namun data user tidak ditemukan.", "Info", JOptionPane.INFORMATION_MESSAGE);
+            }
+        } else {
+            // login cancelled or failed
+        }
+    }
+
+    private void setLoggedUser(Pengguna p) {
+        this.loggedUser = p;
+        if (p != null) {
+            currentUserId = p.getIdPengguna();
+            // jika nama lengkap kosong, fallback ke username
+            currentUserName = (p.getNamaLengkap() == null || p.getNamaLengkap().trim().isEmpty()) ? p.getUsername() : p.getNamaLengkap();
+            lblLoggedUser.setText("Kasir: " + currentUserName);
+            btnLogin.setEnabled(false);
+            btnLogout.setEnabled(true);
+            bTrans.setEnabled(true);
+            // optionally hide Pengguna tab for non-admins
+            try {
+                Integer hak = p.getHakAkses();
+                boolean isAdmin = (hak != null && hak >= 9);
+                if (!isAdmin) {
+                    // remove Pengguna tab if exists
+                    for (int i = 0; i < tabs.getTabCount(); i++) {
+                        if ("Pengguna".equals(tabs.getTitleAt(i))) {
+                            tabs.removeTabAt(i);
+                            break;
+                        }
+                    }
+                }
+            } catch (Throwable ignore) {}
+        } else {
+            // safety fallback
+            currentUserId = null;
+            currentUserName = null;
+            lblLoggedUser.setText("Belum login");
+            btnLogin.setEnabled(true);
+            btnLogout.setEnabled(false);
+            bTrans.setEnabled(false);
+        }
+    }
+
+    private void doLogout() {
+        int ok = JOptionPane.showConfirmDialog(this, "Logout pengguna saat ini?", "Konfirmasi", JOptionPane.YES_NO_OPTION);
+        if (ok == JOptionPane.YES_OPTION) {
+            // clear session
+            this.loggedUser = null;
+            this.currentUserId = null;
+            this.currentUserName = null;
+            lblLoggedUser.setText("Belum login");
+            btnLogin.setEnabled(true);
+            btnLogout.setEnabled(false);
+            bTrans.setEnabled(false);
+            // optionally refresh UI
+            loadVouchers();
+            loadPengguna();
+        }
     }
 
     // ----------------- Load Data -----------------
@@ -340,23 +477,23 @@ public class MainFrame extends JFrame {
         }
     }
 
-   private void loadDetailBarang() {
+    private void loadDetailBarang() {
         try {
             List<DetailBarang> list = detailDao.findAll();
             detailModel.setRowCount(0);
             for (DetailBarang d : list) {
-               String harga = d.getHargaJual() == null ? "0" : d.getHargaJual().toPlainString();
-               detailModel.addRow(new Object[]{
-                       d.getId(),
-                       d.getBarcode(),
-                       d.getStok(),
-                       harga,
-                       d.getTanggalExp(),
-                       d.getNamaBarang(),
-                       d.getNamaSupplier()== null ? "-" : d.getNamaSupplier(),
-                       d.getIdDetailPembelian() == null ? "-" : d.getIdDetailPembelian()
-               });
-           }
+                String harga = d.getHargaJual() == null ? "0" : d.getHargaJual().toPlainString();
+                detailModel.addRow(new Object[]{
+                        d.getId(),
+                        d.getBarcode(),
+                        d.getStok(),
+                        harga,
+                        d.getTanggalExp(),
+                        d.getIdBarang(),
+                        d.getIdSupplier() == null ? "-" : d.getIdSupplier(),
+                        d.getIdDetailPembelian() == null ? "-" : d.getIdDetailPembelian()
+                });
+            }
 
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, "Gagal load detail barang: " + ex.getMessage(),
@@ -367,7 +504,7 @@ public class MainFrame extends JFrame {
     private void loadPembelian() {
         try {
             if (pembelianDAO == null) pembelianDAO = new PembelianDAO();
-            List<Pembelian> list = pembelianDAO.findAllPembelian(); 
+            List<Pembelian> list = pembelianDAO.findAllPembelian();
             pembelianModel.setRowCount(0);
             for (Pembelian p : list) {
                 pembelianModel.addRow(new Object[]{
@@ -383,29 +520,95 @@ public class MainFrame extends JFrame {
         }
     }
 
-  private void loadVouchers() {
-    try {
-        List<Voucher> list = DatabaseHelper.getAllVouchers(); // pastikan getAllVouchers menggunakan same SELECT
-        voucherModel.setRowCount(0);
-        for (Voucher v : list) {
-            String saldo = v.getCurrentBalance() == null ? "0" : v.getCurrentBalance().toPlainString();
-            String bulan = v.getBulan() == null ? "-" : v.getBulan();
-            String namaGuru = v.getNamaGuru() == null ? "-" : v.getNamaGuru();
+    private void loadVouchers() {
+        try {
+            List<Voucher> list = DatabaseHelper.getAllVouchers();
+            voucherModel.setRowCount(0);
+            for (Voucher v : list) {
+                String saldo = v.getCurrentBalance() == null ? "0" : v.getCurrentBalance().toPlainString();
+                String bulan = v.getBulan() == null ? "-" : v.getBulan();
+                String namaGuru = v.getNamaGuru() == null ? "-" : v.getNamaGuru();
 
-            voucherModel.addRow(new Object[]{
-                    v.getIdVoucher(),
-                    v.getKode(),
-                    bulan,
-                    namaGuru,
-                    saldo
-            });
+                voucherModel.addRow(new Object[]{
+                        v.getIdVoucher(),
+                        v.getKode(),
+                        bulan,
+                        namaGuru,
+                        saldo
+                });
+            }
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Gagal load voucher: " + ex.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
         }
-    } catch (Exception ex) {
-        JOptionPane.showMessageDialog(this, "Gagal load voucher: " + ex.getMessage(),
-                "Error", JOptionPane.ERROR_MESSAGE);
     }
-}
 
+    private void loadPengguna() {
+        try {
+            if (penggunaDAO == null) penggunaDAO = new PenggunaDAO();
+            List<Pengguna> list = penggunaDAO.findAll();
+            penggunaModel.setRowCount(0);
+            for (Pengguna p : list) {
+                penggunaModel.addRow(new Object[]{
+                        p.getIdPengguna(),
+                        p.getUsername(),
+                        p.getNamaLengkap() == null ? "-" : p.getNamaLengkap(),
+                        p.getJabatan() == null ? "-" : p.getJabatan(),
+                        p.getHakAkses() == null ? 0 : p.getHakAkses(),
+                        p.getEmail() == null ? "-" : p.getEmail(),
+                        p.getNotelpPengguna() == null ? "-" : p.getNotelpPengguna()
+                });
+            }
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Gagal load pengguna: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    // ----------------- CRUD Pengguna -----------------
+    private void onTambahPengguna() {
+        AddEditPenggunaDialog dlg = new AddEditPenggunaDialog(this, null);
+        dlg.setVisible(true);
+        if (dlg.isSaved()) {
+            try {
+                loadPengguna();
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(this, "Gagal refresh setelah tambah: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+
+    private void onEditPengguna() {
+        int r = tblPengguna.getSelectedRow();
+        if (r < 0) { JOptionPane.showMessageDialog(this, "Pilih baris pengguna"); return; }
+        String id = tblPengguna.getValueAt(r,0).toString();
+        try {
+            if (penggunaDAO == null) penggunaDAO = new PenggunaDAO();
+            Pengguna p = penggunaDAO.findById(id);
+            if (p == null) { JOptionPane.showMessageDialog(this, "Pengguna tidak ditemukan"); return; }
+            AddEditPenggunaDialog dlg = new AddEditPenggunaDialog(this, p);
+            dlg.setVisible(true);
+            if (dlg.isSaved()) {
+                loadPengguna();
+            }
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Gagal edit pengguna: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void onHapusPengguna() {
+        int r = tblPengguna.getSelectedRow();
+        if (r < 0) { JOptionPane.showMessageDialog(this, "Pilih baris pengguna"); return; }
+        String id = tblPengguna.getValueAt(r,0).toString();
+        if (JOptionPane.showConfirmDialog(this, "Hapus pengguna ID " + id + "?", "Konfirmasi", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
+            try {
+                if (penggunaDAO == null) penggunaDAO = new PenggunaDAO();
+                penggunaDAO.delete(id);
+                loadPengguna();
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(this, "Gagal hapus pengguna: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
 
     // ----------------- CRUD Barang -----------------
     private void onTambahBarang() {
@@ -629,7 +832,7 @@ public class MainFrame extends JFrame {
     }
 
     // ----------------- CRUD Detail Barang -----------------
-      private void onTambahDetail() {
+    private void onTambahDetail() {
         AddEditDetailDialog dlg = new AddEditDetailDialog(this, null);
         dlg.setVisible(true);
         if (dlg.isSaved()) {
@@ -707,7 +910,6 @@ public class MainFrame extends JFrame {
         String id = tblPembelian.getValueAt(r, 0).toString();
         try {
             if (pembelianDAO == null) pembelianDAO = new PembelianDAO();
-            // ambil header via findAllPembelian() dan cari yang cocok (simple)
             Pembelian header = null;
             List<Pembelian> all = pembelianDAO.findAllPembelian();
             for (Pembelian p : all) if (id.equals(p.getIdPembelian())) { header = p; break; }
@@ -726,11 +928,11 @@ public class MainFrame extends JFrame {
             sb.append("DETAIL:\n");
             for (DetailPembelian d : details) {
                 sb.append("- Barang ID=").append( d.getIdBarang() == null ? "-" : d.getIdBarang() )
-                  .append(" | Harga=").append(d.getHargaBeli())
-                  .append(" | Stok=").append(d.getStok())
-                  .append(" | Subtotal=").append(d.getSubtotal())
-                  .append(" | Supplier=").append(d.getIdSupplier() == null ? "-" : d.getIdSupplier())
-                  .append("\n");
+                        .append(" | Harga=").append(d.getHargaBeli())
+                        .append(" | Stok=").append(d.getStok())
+                        .append(" | Subtotal=").append(d.getSubtotal())
+                        .append(" | Supplier=").append(d.getIdSupplier() == null ? "-" : d.getIdSupplier())
+                        .append("\n");
             }
 
             JTextArea ta = new JTextArea(sb.toString());
@@ -752,10 +954,9 @@ public class MainFrame extends JFrame {
         if (dlg.isSaved()) {
             try {
                 Voucher v = dlg.getVoucher();
-                DatabaseHelper.insertVoucher((v)); // wrapper helper if needed
+                DatabaseHelper.insertVoucher((v));
                 loadVouchers();
             } catch (Exception ex) {
-                // Jika DatabaseHelper.insertVoucher tidak ada, fallback ke VoucherDAO jika tersedia
                 try {
                     new VoucherDAO().insert(dlg.getVoucher());
                     loadVouchers();
@@ -766,80 +967,68 @@ public class MainFrame extends JFrame {
         }
     }
 
-  private void onEditVoucher() {
-    int r = tblVoucher.getSelectedRow();
-    if (r < 0) {
-        JOptionPane.showMessageDialog(this, "Pilih baris dulu.");
-        return;
-    }
-
-    try {
-        int id = Integer.parseInt(tblVoucher.getValueAt(r, 0).toString());
-        Voucher v = null;
-
-        // ambil voucher via DatabaseHelper terlebih dahulu
-        for (Voucher vv : DatabaseHelper.getAllVouchers()) {
-            if (vv.getIdVoucher() == id) { v = vv; break; }
-        }
-
-        // fallback ke DAO jika tidak ditemukan
-        if (v == null) {
-            v = new VoucherDAO().findById(id);
-        }
-
-        if (v == null) {
-            JOptionPane.showMessageDialog(this, "Voucher tidak ditemukan.");
+    private void onEditVoucher() {
+        int r = tblVoucher.getSelectedRow();
+        if (r < 0) {
+            JOptionPane.showMessageDialog(this, "Pilih baris dulu.");
             return;
         }
 
-        AddEditVoucherDialog dlg = new AddEditVoucherDialog(this, v);
-        dlg.setVisible(true);
-
-        if (!dlg.isSaved()) return;
-
-        // Ambil data hasil edit
-        Voucher edited = dlg.getVoucher();
-        int vid = edited.getIdVoucher();
-        String vkode = edited.getKode();
-        // getIdGuru() di modelmu berbentuk int -> akan auto-box ke Integer
-        Integer vIdGuru = edited.getIdGuru();
-        BigDecimal vBalance = edited.getCurrentBalance();
-        String vBulan = edited.getBulan(); // jika DatabaseHelper tidak handle bulan, VoucherDAO.update() akan mengurusnya
-
-        // coba update utama via DatabaseHelper.updateVoucher(id, kode, idGuru, currentBalance)
         try {
-            DatabaseHelper.updateVoucher(vid, vkode, vBulan, vIdGuru, vBalance);
-        } catch (Exception exPrimary) {
-            // primary gagal -> coba fallback penuh via VoucherDAO.update(Voucher)
-            try {
-                // pastikan Voucher object memiliki semua field yang diperlukan (kode, idGuru, bulan, currentBalance, idVoucher)
-                // VoucherDAO.update akan meng-handle penyimpanan bulan (karena di DAO bulan disimpan sebagai String)
-                new VoucherDAO().update(edited);
-            } catch (Exception exFallback) {
-                // kedua cara gagal -> laporkan ke user
-                exPrimary.printStackTrace();
-                exFallback.printStackTrace();
-                JOptionPane.showMessageDialog(this,
-                        "Gagal memperbarui voucher:\n1) DatabaseHelper.updateVoucher error: " + exPrimary.getMessage() +
-                        "\n2) VoucherDAO.update error: " + exFallback.getMessage(),
-                        "Error", JOptionPane.ERROR_MESSAGE);
+            int id = Integer.parseInt(tblVoucher.getValueAt(r, 0).toString());
+            Voucher v = null;
+
+            for (Voucher vv : DatabaseHelper.getAllVouchers()) {
+                if (vv.getIdVoucher() == id) { v = vv; break; }
+            }
+
+            if (v == null) {
+                v = new VoucherDAO().findById(id);
+            }
+
+            if (v == null) {
+                JOptionPane.showMessageDialog(this, "Voucher tidak ditemukan.");
                 return;
             }
+
+            AddEditVoucherDialog dlg = new AddEditVoucherDialog(this, v);
+            dlg.setVisible(true);
+
+            if (!dlg.isSaved()) return;
+
+            Voucher edited = dlg.getVoucher();
+            int vid = edited.getIdVoucher();
+            String vkode = edited.getKode();
+            Integer vIdGuru = edited.getIdGuru();
+            BigDecimal vBalance = edited.getCurrentBalance();
+            String vBulan = edited.getBulan();
+
+            try {
+                DatabaseHelper.updateVoucher(vid, vkode, vBulan, vIdGuru, vBalance);
+            } catch (Exception exPrimary) {
+                try {
+                    new VoucherDAO().update(edited);
+                } catch (Exception exFallback) {
+                    exPrimary.printStackTrace();
+                    exFallback.printStackTrace();
+                    JOptionPane.showMessageDialog(this,
+                            "Gagal memperbarui voucher:\n1) DatabaseHelper.updateVoucher error: " + exPrimary.getMessage() +
+                                    "\n2) VoucherDAO.update error: " + exFallback.getMessage(),
+                            "Error", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+            }
+
+            JOptionPane.showMessageDialog(this, "Voucher diperbarui.");
+            loadVouchers();
+
+        } catch (NumberFormatException nfe) {
+            JOptionPane.showMessageDialog(this, "ID voucher tidak valid.", "Error", JOptionPane.ERROR_MESSAGE);
+        }catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Gagal edit voucher: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+            ex.printStackTrace();
         }
-
-        JOptionPane.showMessageDialog(this, "Voucher diperbarui.");
-        loadVouchers();
-
-    } catch (NumberFormatException nfe) {
-        JOptionPane.showMessageDialog(this, "ID voucher tidak valid.", "Error", JOptionPane.ERROR_MESSAGE);
-    }catch (Exception ex) {
-        JOptionPane.showMessageDialog(this, "Gagal edit voucher: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-        ex.printStackTrace();
     }
-}
-
-
-   
 
     private void onHapusVoucher() {
         int r = tblVoucher.getSelectedRow();
@@ -852,7 +1041,6 @@ public class MainFrame extends JFrame {
         if (JOptionPane.showConfirmDialog(this, "Hapus voucher ID " + id + "?", "Konfirmasi", JOptionPane.YES_NO_OPTION)
                 == JOptionPane.YES_OPTION) {
             try {
-                // coba DatabaseHelper.deleteVoucher() kalau ada, kalau tidak pakai VoucherDAO
                 try {
                     DatabaseHelper.deleteVoucher(id);
                 } catch (Throwable ignore) {

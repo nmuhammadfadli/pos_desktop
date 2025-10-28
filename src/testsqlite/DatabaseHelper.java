@@ -1,5 +1,8 @@
 package testsqlite;
 
+import Voucher.Voucher;
+import Barang.DetailBarang;
+import Barang.Barang;
 import java.io.File;
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -31,11 +34,10 @@ public class DatabaseHelper {
              Statement stmt = conn.createStatement()) {
 
             // enable pragma early
-                      // pragmas
             try { stmt.execute("PRAGMA foreign_keys = ON;"); } catch (Throwable t) {}
             try { stmt.execute("PRAGMA journal_mode = WAL;"); } catch (Throwable t) {}
 
-            // reference tables
+            // reference tables (create data_pengguna early so FK can reference it)
             stmt.execute("CREATE TABLE IF NOT EXISTS data_kategori (" +
                     "id_kategori VARCHAR(10) PRIMARY KEY, " +
                     "nama_kategori TEXT NOT NULL)");
@@ -51,6 +53,21 @@ public class DatabaseHelper {
                     "nama_supplier TEXT NOT NULL, " +
                     "alamat_supplier TEXT, " +
                     "notelp_supplier TEXT)");
+
+            // ensure data_pengguna exists BEFORE transaksi_penjualan (so FK valid)
+            stmt.execute(
+                "CREATE TABLE IF NOT EXISTS data_pengguna (" +
+                    "id_pengguna TEXT PRIMARY KEY, " +
+                    "username TEXT NOT NULL UNIQUE, " +
+                    "password TEXT, " +
+                    "alamat TEXT, " +
+                    "jabatan TEXT, " +
+                    "nama_lengkap TEXT, " +
+                    "hak_akses INTEGER DEFAULT 0, " +
+                    "email TEXT, " +
+                    "notelp_pengguna TEXT" +
+                ")"
+            );
 
             // barang
             stmt.execute("CREATE TABLE IF NOT EXISTS barang (" +
@@ -80,7 +97,7 @@ public class DatabaseHelper {
                     "FOREIGN KEY(id_supplier) REFERENCES data_supplier(id_supplier) ON DELETE RESTRICT" +
                     ")");
 
-            // detail_barang (batches) - includes id_supplier + optional id_detail_pembelian (to trace when it created a new batch)
+            // detail_barang (batches)
             stmt.execute("CREATE TABLE IF NOT EXISTS detail_barang (" +
                     "id_detail_barang INTEGER PRIMARY KEY AUTOINCREMENT, " +
                     "id_barang INTEGER NOT NULL, " +
@@ -95,7 +112,7 @@ public class DatabaseHelper {
                     "FOREIGN KEY (id_detail_pembelian) REFERENCES detail_pembelian(id_detail_pembelian) ON DELETE CASCADE" +
                     ")");
 
-            // other tables (voucher, transaksi, etc.)
+            // kode_voucher
             stmt.execute("CREATE TABLE IF NOT EXISTS kode_voucher (" +
                     "id_voucher INTEGER PRIMARY KEY AUTOINCREMENT, " +
                     "kode TEXT UNIQUE, " +
@@ -105,7 +122,9 @@ public class DatabaseHelper {
                     "created_at TEXT DEFAULT (datetime('now')), " +
                     "FOREIGN KEY(id_guru) REFERENCES data_guru(id_guru))");
 
-            stmt.execute("CREATE TABLE IF NOT EXISTS transaksi_penjualan (" +
+            // transaksi_penjualan (fixed syntax; FK references exist)
+            stmt.execute(
+                "CREATE TABLE IF NOT EXISTS transaksi_penjualan (" +
                     "id_transaksi INTEGER PRIMARY KEY AUTOINCREMENT, " +
                     "kode_transaksi TEXT UNIQUE, " +
                     "tgl_transaksi TEXT DEFAULT (datetime('now')), " +
@@ -114,8 +133,13 @@ public class DatabaseHelper {
                     "kembalian TEXT NOT NULL DEFAULT '0', " +
                     "payment_method TEXT NOT NULL DEFAULT 'CASH', " +
                     "id_voucher INTEGER, " +
-                    "FOREIGN KEY (id_voucher) REFERENCES kode_voucher(id_voucher))");
+                    "id_pengguna TEXT, " +   // nullable to allow legacy / tests
+                    "FOREIGN KEY (id_voucher) REFERENCES kode_voucher(id_voucher), " +
+                    "FOREIGN KEY (id_pengguna) REFERENCES data_pengguna(id_pengguna)" +
+                ")"
+            );
 
+            // detail_penjualan
             stmt.execute("CREATE TABLE IF NOT EXISTS detail_penjualan (" +
                     "id_detail_penjualan INTEGER PRIMARY KEY AUTOINCREMENT, " +
                     "id_transaksi INTEGER NOT NULL, " +
@@ -125,6 +149,7 @@ public class DatabaseHelper {
                     "subtotal TEXT NOT NULL, " +
                     "FOREIGN KEY (id_transaksi) REFERENCES transaksi_penjualan(id_transaksi))");
 
+            // voucher_usage
             stmt.execute("CREATE TABLE IF NOT EXISTS voucher_usage (" +
                     "id_usage INTEGER PRIMARY KEY AUTOINCREMENT, " +
                     "id_voucher INTEGER NOT NULL, " +
@@ -132,6 +157,7 @@ public class DatabaseHelper {
                     "used_amount TEXT NOT NULL, " +
                     "used_at TEXT DEFAULT (datetime('now')))");
 
+            // receivable
             stmt.execute("CREATE TABLE IF NOT EXISTS receivable (" +
                     "id_receivable INTEGER PRIMARY KEY AUTOINCREMENT, " +
                     "id_transaksi INTEGER NOT NULL UNIQUE, " +
@@ -141,23 +167,28 @@ public class DatabaseHelper {
                     "created_at TEXT DEFAULT (datetime('now')), " +
                     "status TEXT DEFAULT 'OPEN')");
 
-      // indexes
+            // indexes
             try { stmt.execute("CREATE INDEX IF NOT EXISTS idx_detail_barang_idx ON detail_barang(id_barang, id_supplier, harga_jual)"); } catch (Throwable t) {}
             try { stmt.execute("CREATE INDEX IF NOT EXISTS idx_detail_pembelian_id_barang ON detail_pembelian(id_barang)"); } catch (Throwable t) {}
             try { stmt.execute("CREATE INDEX IF NOT EXISTS idx_detail_pembelian_id_supplier ON detail_pembelian(id_supplier)"); } catch (Throwable t) {}
 
-            // trigger: merge-on-insert behavior
-try {
-    stmt.execute(
-        "DROP TRIGGER IF EXISTS trg_after_insert_detail_pembelian_merge; "
-    );
-} catch (Throwable t) {
-    System.err.println("warning creating trg_after_insert_detail_pembelian_merge: " + t.getMessage());
-}
-
-
-            // trigger: when a purchase detail is deleted, remove batch rows that were created pointing to it
-            // (only affects batches that saved id_detail_pembelian; merged batches without that id remain untouched)
+            // triggers (unchanged)
+            try {
+                stmt.execute(
+                    "CREATE TRIGGER IF NOT EXISTS trg_after_insert_detail_pembelian_merge " +
+                    "AFTER INSERT ON detail_pembelian " +
+                    "FOR EACH ROW " +
+                    "BEGIN " +
+                    "  UPDATE detail_barang SET stok = stok + NEW.stok " +
+                    "    WHERE id_barang = NEW.id_barang AND id_supplier = NEW.id_supplier AND harga_jual = CAST(NEW.harga_beli AS TEXT);\n" +
+                    "  INSERT INTO detail_barang (id_barang, id_supplier, stok, harga_jual, tanggal_exp, barcode, id_detail_pembelian) " +
+                    "    SELECT NEW.id_barang, NEW.id_supplier, NEW.stok, CAST(NEW.harga_beli AS TEXT), NULL, NULL, NEW.id_detail_pembelian " +
+                    "    WHERE NOT EXISTS (SELECT 1 FROM detail_barang WHERE id_barang = NEW.id_barang AND id_supplier = NEW.id_supplier AND harga_jual = CAST(NEW.harga_beli AS TEXT));\n" +
+                    "END;"
+                );
+            } catch (Throwable t) {
+                System.err.println("warning creating trg_after_insert_detail_pembelian_merge: " + t.getMessage());
+            }
             try {
                 stmt.execute(
                     "CREATE TRIGGER IF NOT EXISTS trg_after_delete_detail_pembelian_cleanup " +
@@ -173,13 +204,62 @@ try {
 
             // sample data if db new
             if (!existed) {
+                // sample kategori
                 try (PreparedStatement ps = conn.prepareStatement(
                         "INSERT OR IGNORE INTO data_kategori (id_kategori, nama_kategori) VALUES (?, ?)")) {
                     ps.setString(1, "KTG01");
                     ps.setString(2, "Umum");
                     ps.executeUpdate();
+                } catch (Throwable t) {
+                    System.err.println("warning inserting sample kategori: " + t.getMessage());
                 }
 
+                // sample pengguna (dummy) - gunakan setInt untuk hak_akses
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT OR IGNORE INTO data_pengguna (id_pengguna, username, password, alamat, jabatan, nama_lengkap, hak_akses, email, notelp_pengguna) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+
+                    // Admin
+                    ps.setString(1, "USR001");
+                    ps.setString(2, "admin");
+                    ps.setString(3, "admin"); // plain-text for dev only
+                    ps.setString(4, "Jl. Administrator 1");
+                    ps.setString(5, "Administrator");
+                    ps.setString(6, "Admin Sistem");
+                    ps.setInt(7, 99);
+                    ps.setString(8, "admin@example.com");
+                    ps.setString(9, "0811000001");
+                    ps.executeUpdate();
+
+                    // Kasir 1
+                    ps.setString(1, "USR002");
+                    ps.setString(2, "kasir1");
+                    ps.setString(3, "kasir123");
+                    ps.setString(4, "Jl. Kasir 2");
+                    ps.setString(5, "Kasir");
+                    ps.setString(6, "Budi Santoso");
+                    ps.setInt(7, 1);
+                    ps.setString(8, "budi@example.com");
+                    ps.setString(9, "0811000002");
+                    ps.executeUpdate();
+
+                    // Kasir 2
+                    ps.setString(1, "USR003");
+                    ps.setString(2, "kasir2");
+                    ps.setString(3, "kasir123");
+                    ps.setString(4, "Jl. Kasir 3");
+                    ps.setString(5, "Kasir");
+                    ps.setString(6, "Siti Rahma");
+                    ps.setInt(7, 1);
+                    ps.setString(8, "siti@example.com");
+                    ps.setString(9, "0811000003");
+                    ps.executeUpdate();
+
+                    System.out.println("Sample pengguna disisipkan (USR001..USR003).");
+                } catch (Throwable t) {
+                    System.err.println("warning inserting sample pengguna: " + t.getMessage());
+                }
+
+                // sample barang
                 try (PreparedStatement ps = conn.prepareStatement(
                         "INSERT INTO barang (nama, id_kategori) VALUES (?, ?)")) {
                     ps.setString(1, "Kopi Bondowoso");
@@ -193,6 +273,7 @@ try {
                     System.err.println("warning inserting sample barang: " + t.getMessage());
                 }
 
+                // sample suppliers
                 try (PreparedStatement ps = conn.prepareStatement(
                         "INSERT INTO data_supplier (nama_supplier, alamat_supplier, notelp_supplier) VALUES (?, ?, ?)")) {
                     ps.setString(1, "Supplier A");
@@ -208,43 +289,10 @@ try {
                     System.err.println("warning inserting sample suppliers: " + t.getMessage());
                 }
 
-                // sample pembelian header
-                try (PreparedStatement psHead = conn.prepareStatement(
-                        "INSERT INTO data_pembelian (id_pembelian, tgl_pembelian, payment_method, total_harga) VALUES (?, ?, ?, ?)")) {
-                    psHead.setString(1, "PB-20251019-001");
-                    psHead.setString(2, "2025-10-19");
-                    psHead.setString(3, "CREDIT");
-                    psHead.setInt(4, 170000);
-                    psHead.executeUpdate();
-                } catch (Throwable t) {
-                    System.err.println("warning inserting sample pembelian header: " + t.getMessage());
-                }
-
-                // sample detail_pembelian (these will trigger merge/insert into detail_barang)
-                try (PreparedStatement psDetail = conn.prepareStatement(
-                        "INSERT INTO detail_pembelian (id_pembelian, id_barang, id_supplier, harga_beli, stok, subtotal) VALUES (?, ?, ?, ?, ?, ?)")) {
-                    psDetail.setString(1, "PB-20251019-001");
-                    psDetail.setInt(2, 1); // barang id 1
-                    psDetail.setInt(3, 1); // supplier A
-                    psDetail.setInt(4, 50000);
-                    psDetail.setInt(5, 2);
-                    psDetail.setInt(6, 100000);
-                    psDetail.executeUpdate();
-
-                    psDetail.setString(1, "PB-20251019-001");
-                    psDetail.setInt(2, 2); // barang id 2
-                    psDetail.setInt(3, 2); // supplier B
-                    psDetail.setInt(4, 70000);
-                    psDetail.setInt(5, 1);
-                    psDetail.setInt(6, 70000);
-                    psDetail.executeUpdate();
-                } catch (Throwable t) {
-                    System.err.println("warning inserting sample detail_pembelian: " + t.getMessage());
-                }
-
+                // sample voucher
                 try (PreparedStatement ps = conn.prepareStatement(
                         "INSERT INTO kode_voucher (kode,id_guru,current_balance) VALUES (?,?,?)")) {
-                    ps.setString(1, "VCHR-001");
+                    ps.setString(1, "VCHR001");
                     ps.setObject(2, null);
                     ps.setString(3, new BigDecimal("50000").toPlainString());
                     ps.executeUpdate();
@@ -256,6 +304,9 @@ try {
             } else {
                 System.out.println("Database sudah ada: " + DB_PATH);
             }
+
+            // after init, print pengguna to help debugging (shows whether dummy present)
+            printAllPenggunaDetailed();
         }
     }
 
@@ -265,8 +316,164 @@ try {
         } catch (ClassNotFoundException e) {
             System.err.println("Driver SQLite tidak ditemukan. Pastikan sqlite-jdbc.jar ada di Libraries.");
         }
-        return DriverManager.getConnection(URL);
+        Connection conn = DriverManager.getConnection(URL);
+        try (Statement s = conn.createStatement()) {
+            s.execute("PRAGMA foreign_keys = ON;");
+            // jangan set WAL berulang-ubah jika tidak perlu, tapi boleh:
+            // s.execute("PRAGMA journal_mode = WAL;");
+        } catch (SQLException ignore) {}
+        return conn;
     }
+
+    // ----- ensure sample pengguna exists even if DB file already existed -----
+    private static void ensureSamplePengguna(Connection conn) {
+    try (PreparedStatement psCheck = conn.prepareStatement("SELECT COUNT(1) FROM data_pengguna");
+         ResultSet rs = psCheck.executeQuery()) {
+        int count = 0;
+        if (rs.next()) count = rs.getInt(1);
+        if (count == 0) {
+            System.out.println("data_pengguna kosong — akan disisipkan sample pengguna.");
+            // gunakan transaction agar semua insert konsisten
+            boolean oldAuto = conn.getAutoCommit();
+            try {
+                conn.setAutoCommit(false);
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT INTO data_pengguna (id_pengguna, username, password, alamat, jabatan, nama_lengkap, hak_akses, email, notelp_pengguna) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+                    // Admin
+                    ps.setString(1, "USR001");
+                    ps.setString(2, "admin");
+                    ps.setString(3, "admin");
+                    ps.setString(4, "Jl. Administrator 1");
+                    ps.setString(5, "Administrator");
+                    ps.setString(6, "Admin Sistem");
+                    ps.setInt(7, 99);
+                    ps.setString(8, "admin@example.com");
+                    ps.setString(9, "0811000001");
+                    int u = ps.executeUpdate();
+                    System.out.println("Inserted admin rows = " + u);
+
+                    // Kasir 1
+                    ps.setString(1, "USR002");
+                    ps.setString(2, "kasir1");
+                    ps.setString(3, "kasir123");
+                    ps.setString(4, "Jl. Kasir 2");
+                    ps.setString(5, "Kasir");
+                    ps.setString(6, "Budi Santoso");
+                    ps.setInt(7, 1);
+                    ps.setString(8, "budi@example.com");
+                    ps.setString(9, "0811000002");
+                    u = ps.executeUpdate();
+                    System.out.println("Inserted kasir1 rows = " + u);
+
+                    // Kasir 2
+                    ps.setString(1, "USR003");
+                    ps.setString(2, "kasir2");
+                    ps.setString(3, "kasir123");
+                    ps.setString(4, "Jl. Kasir 3");
+                    ps.setString(5, "Kasir");
+                    ps.setString(6, "Siti Rahma");
+                    ps.setInt(7, 1);
+                    ps.setString(8, "siti@example.com");
+                    ps.setString(9, "0811000003");
+                    u = ps.executeUpdate();
+                    System.out.println("Inserted kasir2 rows = " + u);
+                }
+                conn.commit();
+            } catch (Throwable t) {
+                try { conn.rollback(); } catch (Throwable ignore) {}
+                System.err.println("Gagal menyisipkan sample pengguna (rollback): " + t.getMessage());
+            } finally {
+                try { conn.setAutoCommit(oldAuto); } catch (SQLException ignore) {}
+            }
+        } else {
+            System.out.println("data_pengguna sudah berisi " + count + " baris; sample tidak disisipkan.");
+        }
+    } catch (Throwable t) {
+        System.err.println("Gagal mengecek/menyisipkan sample pengguna: " + t.getMessage());
+    }
+}
+    
+    public static String generateNextVoucherCode() throws SQLException {
+    try (Connection conn = getConnection()) {
+        return generateNextVoucherCode(conn);
+    }
+}
+
+public static String generateNextVoucherCode(Connection conn) throws SQLException {
+    String sql = "SELECT MAX(CAST(substr(kode, 5) AS INTEGER)) AS maxn " +
+                 "FROM kode_voucher WHERE kode GLOB 'VCHR[0-9]*'";
+    try (PreparedStatement ps = conn.prepareStatement(sql);
+         ResultSet rs = ps.executeQuery()) {
+        int next = 1;
+        if (rs.next()) {
+            Object mx = rs.getObject("maxn");
+            if (mx != null) {
+                try {
+                    next = ((Number) mx).intValue() + 1;
+                } catch (ClassCastException cce) {
+                    // fallback: parse as string
+                    try {
+                        next = Integer.parseInt(rs.getString("maxn")) + 1;
+                    } catch (Exception ignore) { next = 1; }
+                }
+            }
+        }
+        // format minimal 3 digit, tumbuh jika angka lebih besar (001, 010, 100, 1000, dll)
+        String suffix = String.format("%03d", next);
+        return "VCHR" + suffix;
+    }
+}
+
+    
+    // helper: print contents of data_pengguna (for quick debugging)
+   // print semua kolom (debug)
+public static void printAllPenggunaDetailed() {
+    String sql = "SELECT id_pengguna, username, password, alamat, jabatan, nama_lengkap, hak_akses, email, notelp_pengguna FROM data_pengguna ORDER BY id_pengguna";
+    try (Connection conn = getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql);
+         ResultSet rs = ps.executeQuery()) {
+        System.out.println("== daftar data_pengguna (detailed) ==");
+        int count = 0;
+        while (rs.next()) {
+            count++;
+            System.out.println("id_pengguna   : " + rs.getString("id_pengguna"));
+            System.out.println("username      : " + rs.getString("username"));
+            System.out.println("password      : " + rs.getString("password"));
+            System.out.println("alamat        : " + rs.getString("alamat"));
+            System.out.println("jabatan       : " + rs.getString("jabatan"));
+            System.out.println("nama_lengkap  : " + rs.getString("nama_lengkap"));
+            System.out.println("hak_akses     : " + rs.getObject("hak_akses"));
+            System.out.println("email         : " + rs.getString("email"));
+            System.out.println("notelp        : " + rs.getString("notelp_pengguna"));
+            System.out.println("----------------------------------------");
+        }
+        if (count == 0) System.out.println("(kosong)");
+        System.out.println("== end daftar data_pengguna ==");
+    } catch (Exception e) {
+        System.err.println("Gagal membaca data_pengguna: " + e.getMessage());
+    }
+}
+
+// kembalian programatik: list of maps (optional)
+public static List<java.util.Map<String,Object>> getAllPenggunaAsMap() throws SQLException {
+    List<java.util.Map<String,Object>> list = new ArrayList<>();
+    String sql = "SELECT id_pengguna, username, password, alamat, jabatan, nama_lengkap, hak_akses, email, notelp_pengguna FROM data_pengguna ORDER BY id_pengguna";
+    try (Connection conn = getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql);
+         ResultSet rs = ps.executeQuery()) {
+        ResultSetMetaData md = rs.getMetaData();
+        int cols = md.getColumnCount();
+        while (rs.next()) {
+            java.util.Map<String,Object> row = new java.util.HashMap<>();
+            for (int i = 1; i <= cols; i++) {
+                row.put(md.getColumnLabel(i), rs.getObject(i));
+            }
+            list.add(row);
+        }
+    }
+    return list;
+}
+
 
     // ------------------ CRUD Barang ------------------
     public static List<Barang> getAllBarang() throws SQLException {
